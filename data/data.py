@@ -152,8 +152,8 @@ class mrms():
         ds2 = xr.open_dataset(f"./{dirname}/backup/rf-10.nc", chunks={'time': 1, 'lat': 2500, 'lon': 6000})
         merged_ds = xr.merge([ds1, ds2])
         merged_ds.to_zarr(f"./{dirname}/mrms.zarr", mode='w', consolidated=True)
-        subprocess.run(f"rm ./{dirname}/backup/etop.nc", shell=True)
-        subprocess.run(f"rm ./{dirname}/backup/shsr.nc", shell=True)
+        subprocess.run(f"rm ./{dirname}/backup/vil.nc", shell=True)
+        subprocess.run(f"rm ./{dirname}/backup/rf-10.nc", shell=True)
 
 
 
