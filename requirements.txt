@@ -1,0 +1,12 @@
+You porbably already have most of the libraries needed for this, but there are some packages that you may not have installed. Preferably everything should be installed via conda in the base environment.
+
+Required python packages:
+boto3 (conda install boto3)
+Herbie (https://github.com/blaylockbk/Herbie)
+python-cdo (conda install -c conda-forge python-cdo)
+
+Required command line pacakges:
+netcdf-4 (what I like to do is install this by installing netcdf-fortran, which is sudo apt install libnetcdff-dev)
+cdo (sudo apt install cdo)
+gdal (sudo apt install libgdal-dev)
+wgrib2 (you should find instructions at https://www.cpc.ncep.noaa.gov/products/wesley/wgrib2/, when you install it, you need to give it netcdf-4 capabilities, give it the path to your netcdf lib and bin, but let it install its own hdf5)
