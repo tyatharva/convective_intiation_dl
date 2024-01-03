@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sun Dec 31 01:30:00 UTC 2023
+Created on Sat Dec  9 15:14:33 2023
 
-@author: Atharva Tyagi
+@author: atyagi
 """
+
+# This script retrieves data to train the model, each piece of data is for the past hour from the time specified in the filename of the data
+# Each piece of data is around 25-30 gb, so make sure you have enough space, and also I think this script requires about 20-30 gb of ram (not sure though)
+# Please read all of the comments before you run this script
 
 import os
 import time
@@ -39,7 +43,7 @@ class utils():
         os.makedirs(main_folder_path, exist_ok=True)
         backup_folder_path = os.path.join(main_folder_path, 'backup')
         os.makedirs(backup_folder_path, exist_ok=True)
-        subfolders = ['bd02', 'bd11', 'rtma', 'hrrr', 'vil', 'rf-10']
+        subfolders = ['bd02', 'bd11', 'rtma', 'hrrr', 'vil', 'rf-10', 'elev']
         for subfolder in subfolders:
             subfolder_path = os.path.join(backup_folder_path, subfolder)
             os.makedirs(subfolder_path, exist_ok=True)
@@ -52,6 +56,27 @@ class utils():
             return files
         else:
             return []
+    
+    @staticmethod
+    def elev_time(dirname, etime):
+        etime -= timedelta(hours=2)
+        for i in range(2):
+            etime += timedelta(hours=1)
+            etime_str = etime.strftime("%Y-%m-%d,%H:%M:00,5min")
+            cdo.settaxis(f"{etime_str}", input="./perm/elev.nc", options="-f nc4 -r", output=f"./{dirname}/backup/elev/elev{i}.nc")
+        etime -= timedelta(hours=1)
+        etime_str = etime.strftime("%Y-%m-%d,%H:%M:00,5min")
+        cdo.inttime(f"{etime_str}", input=f"-mergetime ./{dirname}/backup/elev/elev0.nc ./{dirname}/backup/elev/elev1.nc", options="-b F32 -f nc4 -r", output=f"./{dirname}/backup/elev.nc")
+    
+    @staticmethod
+    def merge_ins(dirname):
+        ds1 = xr.open_dataset(f"./{dirname}/backup/bd02.nc", chunks={'time': 1, 'lat': 2500, 'lon': 6000})
+        ds2 = xr.open_dataset(f"./{dirname}/backup/bd11.nc", chunks={'time': 1, 'lat': 2500, 'lon': 6000})
+        ds3 = xr.open_dataset(f"./{dirname}/backup/rtma.nc", chunks={'time': 1, 'lat': 2500, 'lon': 6000})
+        ds4 = xr.open_dataset(f"./{dirname}/backup/hrrr.nc", chunks={'time': 1, 'lat': 2500, 'lon': 6000})
+        ds5 = xr.open_dataset(f"./{dirname}/backup/elev.nc", chunks={'time': 1, 'lat': 2500, 'lon': 6000})
+        merged_ds = xr.merge([ds1, ds2, ds3, ds4, ds5])
+        merged_ds.to_zarr(f"./{dirname}/inputs.zarr", mode='w', consolidated=True)
 
 
 
@@ -69,7 +94,7 @@ class mrms():
         
         x = 0
         gettim2 = gettime + timedelta(minutes=2)
-        while x < 30:
+        while x < 31:
             date_str = gettim2.strftime("%Y%m%d")
             time_str = gettim2.strftime("%H%M")
             files_in_directory = utils.list_files_s3("noaa-mrms-pds", f"CONUS/{product_long}/{date_str}/")
@@ -85,7 +110,7 @@ class mrms():
             gettim2 += timedelta(minutes=2)
         
         i = 0
-        while i < 90:
+        while i < 30:
             date_str = gettime.strftime("%Y%m%d")
             time_str = gettime.strftime("%H%M")
             files_in_directory = utils.list_files_s3("noaa-mrms-pds", f"CONUS/{product_long}/{date_str}/")
@@ -123,23 +148,27 @@ class mrms():
         ]
         subprocess.run(mergetime)
         
-        gettime += timedelta(minutes=2)
-        settime_str = gettime.strftime("%Y-%m-%d,%H:%M:00,2min")
         
+        gettime += timedelta(minutes=2)
+        itime = gettime.strftime("%Y-%m-%d,%H:%M:00")
+        cdo.inttime(f"{itime},5min", input=f"-settaxis,{itime},2min ./{dirname}/backup/{product_short}/{product_short}tmp.nc", options='-f nc4 -r', output=f"./{dirname}/backup/{product_short}/{product_short}tmpp.nc")
+        
+        tmptime = mtime - timedelta(hours=1)
+        stime = tmptime.strftime("%Y-%m-%d,%H:%M:00,5min")
         settaxis = [
             "cdo",
             "-f", "nc4", "-r",
-            f"settaxis,{settime_str}",
-            f"./{dirname}/backup/{product_short}/{product_short}tmp.nc",
-            f"./{dirname}/backup/{product_short}/{product_short}tmpp.nc"
+            f"settaxis,{stime}",
+            f"./{dirname}/backup/{product_short}/{product_short}tmpp.nc",
+            f"./{dirname}/backup/{product_short}/{product_short}tmppp.nc"
         ]
         subprocess.run(settaxis)
         
         remap = [
             "cdo",
-            "-f", "nc4",
+            "-b", "F32", "-f", "nc4",
             "remapnn,./perm/mygrid",
-            f"./{dirname}/backup/{product_short}/{product_short}tmpp.nc",
+            f"./{dirname}/backup/{product_short}/{product_short}tmppp.nc",
             f"./{dirname}/backup/{product_short}.nc"
         ]
         subprocess.run(remap)
@@ -151,7 +180,7 @@ class mrms():
         ds1 = xr.open_dataset(f"./{dirname}/backup/vil.nc", chunks={'time': 1, 'lat': 2500, 'lon': 6000})
         ds2 = xr.open_dataset(f"./{dirname}/backup/rf-10.nc", chunks={'time': 1, 'lat': 2500, 'lon': 6000})
         merged_ds = xr.merge([ds1, ds2])
-        merged_ds.to_zarr(f"./{dirname}/mrms.zarr", mode='w', consolidated=True)
+        merged_ds.to_zarr(f"./{dirname}/target.zarr", mode='w', consolidated=True)
         subprocess.run(f"rm ./{dirname}/backup/vil.nc", shell=True)
         subprocess.run(f"rm ./{dirname}/backup/rf-10.nc", shell=True)
 
@@ -175,15 +204,19 @@ class hrrr():
                         shutil.move(file_path, new_path)
                 shutil.rmtree(item_path)
     
-    def hrrr(dirname, hrtime):
+    def hrrr(dirname, htime):
+        
+        hrtime = htime - timedelta(hours=1, minutes=hrrr.delaytime)
+        hrtime = hrtime.replace(minute=0)
         DATES = pd.date_range(
             start=hrtime.strftime("%Y-%m-%d %H:00"),
-            periods=3,
+            periods=2,
             freq="1H",
         )
+        
         fxx=range(0,1)
         data = FastHerbie(DATES, model="hrrr", product="prs", fxx=fxx, max_threads=16,)
-        data.download(searchString="(ABSV)|(4LFTX)|(CFNSF)|(CLWMR)|(CAPE)|(CIN)|(DPT)|(DLWRF)|(DSWRF)|(EFHL)|(FRICV)|(HGT)|(ICEC)|(LAND)|(LHTFL)|(MSTAV)|(MSLMA)|(HPBL)|(CNWAT)|(PWAT)|(PRES)|(RELV)|(SHTFL)|(SNOWC)|(LFTX)|(SFCR)|(TMP)|(UGRD)|(VGRD)|(VGTYP)|(DZDT)|(VVEL)|(0-0 m below ground)", max_threads=16, save_dir = f"./{dirname}/backup/")
+        data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(([5-8][0,5]0)|(10[0,1][0,3])|(9[0,2,5,7][0,5])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:no_level)|(HGT:0C isotherm)|(LFTX)|(VGTYP)", max_threads=16, save_dir = f"./{dirname}/backup/")
         hrrr.mfilerdir_hrrr(f"./{dirname}/backup/hrrr/")
         
         tonc = [
@@ -192,25 +225,15 @@ class hrrr():
         ]
         subprocess.run(tonc)
         
-        path = f"./{dirname}/backup/hrrr/"
-        pattern = f"{path}*.nc"
-        files = glob.glob(pattern)
-        files = sorted(files)
-        for file in files:
-            base_filename = os.path.splitext(os.path.basename(file))[0]
-            output_filename = f"{base_filename}_remap.nc"
-            cdo.remapnn('./perm/mygrid', input=f'-delname,HGT_surface {file}', options='-P 16 -f nc4 -r', output=os.path.join(path, output_filename))
-            
-        z = 0
-        files = glob.glob(f"./{dirname}/backup/hrrr/*remap.nc")
-        files = sorted(files)
-        for file in files:
-            ds = xr.open_dataset(file, chunks={'time': 1, 'lat': 2500, 'lon': 6000})
-            if (z == 0):
-                ds.to_zarr(f"./{dirname}/hrrr.zarr", consolidated=True)
-                z+=1
-            else:
-                ds.to_zarr(f"./{dirname}/hrrr.zarr", consolidated=True, append_dim='time')
+        tstime = htime - timedelta(hours=1)
+        stime = tstime.strftime("%Y-%m-%d,%H:%M:00,5min")
+        ltime = hrtime.strftime("%Y-%m-%d,%H:%M:00,5min")
+        h1 = hrtime.strftime("%H")
+        hrtime += timedelta(hours=1)
+        h2 = hrtime.strftime("%H")
+        f1 = glob.glob(f"./{dirname}/backup/hrrr/*t{h1}z*.nc")[0]
+        f2 = glob.glob(f"./{dirname}/backup/hrrr/*t{h2}z*.nc")[0]
+        cdo.remapnn("./perm/mygrid", input=f"-settaxis,{stime} -inttime,{ltime} -mergetime {f1} {f2}", options='-b F32 -P 16 -f nc4 -r', output=f"./{dirname}/backup/hrrr.nc")
         
         remove = [f"rm ./{dirname}/backup/hrrr/*.nc"]
         subprocess.run(remove, shell=True)
@@ -230,7 +253,7 @@ class rtma():
             gettime -= timedelta(minutes=remain)
         
         i = 0
-        while i< 12:
+        while i < 5:
             date_str = gettime.strftime("%Y%m%d")
             time_str = gettime.strftime("%H%M")
             s3.download_file("noaa-rtma-pds", f"rtma2p5_ru.{date_str}/rtma2p5_ru.t{time_str}z.2dvaranl_ndfd.grb2", f"./{dirname}/backup/rtma/rtma_{date_str}_{time_str}.grb2")
@@ -243,14 +266,16 @@ class rtma():
         ]
         subprocess.run(tonc)
         
-        cdo.remapnn('./perm/mygrid', input='-chname,DPT_2maboveground,rtma_DPT_2maboveground,GUST_10maboveground,rtma_GUST_10maboveground,PRES_surface,rtma_PRES_surface,TMP_2maboveground,rtma_TMP_2maboveground,UGRD_10maboveground,rtma_UGRD_10maboveground,VGRD_10maboveground,rtma_VGRD_10maboveground -delname,HGT_surface,CEIL_cloudceiling,TCDC_entireatmosphere_consideredasasinglelayer_,VIS_surface,WDIR_10maboveground,WIND_10maboveground,SPFH_2maboveground -mergetime '+f"./{dirname}/backup/rtma/*.nc", options='-f nc4', output=f"./{dirname}/backup/rtma.nc")
-
+        gettime += timedelta(minutes=15)
+        ttim_str = gettime.strftime("%Y-%m-%d,%H:%M:00,5min")
+        
+        tretime = rtime - timedelta(hours=1)
+        ftim_str = tretime.strftime("%Y-%m-%d,%H:%M:00,5min")
+        
+        cdo.settaxis(f"{ftim_str}", input=f"-inttime,{ttim_str} -remapnn,./perm/mygrid -chname,DPT_2maboveground,rtma_DPT_2maboveground,GUST_10maboveground,rtma_GUST_10maboveground,PRES_surface,rtma_PRES_surface,TMP_2maboveground,rtma_TMP_2maboveground,UGRD_10maboveground,rtma_UGRD_10maboveground,VGRD_10maboveground,rtma_VGRD_10maboveground -delname,HGT_surface,CEIL_cloudceiling,TCDC_entireatmosphere_consideredasasinglelayer_,VIS_surface,WDIR_10maboveground,WIND_10maboveground,SPFH_2maboveground -mergetime ./{dirname}/backup/rtma/*.nc", options='-b F32 -f nc4 -r', output=f"./{dirname}/backup/rtma.nc")
+        
         remove = [f"rm ./{dirname}/backup/rtma/*.nc"]
         subprocess.run(remove, shell=True)
-        
-        ds = xr.open_dataset(f"./{dirname}/backup/rtma.nc", chunks={'time': 1, 'lat': 2500, 'lon': 6000})
-        ds.to_zarr(f"./{dirname}/rtma.zarr", mode='w', consolidated=True)
-        subprocess.run(f"rm ./{dirname}/backup/rtma.nc", shell=True)
 
 
 
@@ -258,11 +283,11 @@ class goes():
     
     delaytime = 5
     
-    def goes(dirname, product, bandnum, goestime):
+    def goes(dirname, product, bandnum, gtime):
         
-        gettime = goestime
+        gettime = gtime - timedelta(minutes=goes.delaytime)
         i = 0
-        while i < 36:
+        while i < 13:
             minute_str = gettime.strftime("%M").zfill(2)
             hour_str = gettime.strftime("%H").zfill(2)
             doy_str = str(gettime.timetuple().tm_yday).zfill(3)
@@ -282,13 +307,13 @@ class goes():
         if (product == "bd11"):
             toref = [
                 "bash", "-c",
-                f"for file in ./{dirname}/backup/bd11/*.nc; do cdo -f nc4 expr,'bright=(planck_fk2/(log((planck_fk1/Rad)+1))-planck_bc1)/planck_bc2;' \"$file\" \"${{file%.nc}}_tmp1.nc\" && gdalwarp -s_srs \"+proj=geos +h=35786023.0 +a=6378137.0 +b=6356752.31414 +f=0.0033528106647475126 +lon_0=-75.0 +sweep=x +no_defs\" -t_srs EPSG:4326 -r near \"${{file%.nc}}_tmp1.nc\" \"${{file%.nc}}_tmp2.nc\"; done"
+                f"for file in ./{dirname}/backup/bd11/*.nc; do cdo -f nc4 expr,'bright=(planck_fk2/(log((planck_fk1/Rad)+1))-planck_bc1)/planck_bc2;' \"$file\" \"${{file%.nc}}_tmp1.nc\" && gdalwarp -q -s_srs \"+proj=geos +h=35786023.0 +a=6378137.0 +b=6356752.31414 +f=0.0033528106647475126 +lon_0=-75.0 +sweep=x +no_defs\" -t_srs EPSG:4326 -r near \"${{file%.nc}}_tmp1.nc\" \"${{file%.nc}}_tmp2.nc\"; done"
             ]
         
         else:
             toref = [
                 "bash", "-c",
-                f"for file in ./{dirname}/backup/bd02/*.nc; do cdo -f nc4 expr,'2ref=kappa0*Rad;' \"$file\" \"${{file%.nc}}_tmp1.nc\" && gdalwarp -s_srs \"+proj=geos +h=35786023.0 +a=6378137.0 +b=6356752.31414 +f=0.0033528106647475126 +lon_0=-75.0 +sweep=x +no_defs\" -t_srs EPSG:4326 -r near \"${{file%.nc}}_tmp1.nc\" \"${{file%.nc}}_tmp2.nc\"; done"
+                f"for file in ./{dirname}/backup/bd02/*.nc; do cdo -f nc4 expr,'2ref=kappa0*Rad;' \"$file\" \"${{file%.nc}}_tmp1.nc\" && gdalwarp -q -s_srs \"+proj=geos +h=35786023.0 +a=6378137.0 +b=6356752.31414 +f=0.0033528106647475126 +lon_0=-75.0 +sweep=x +no_defs\" -t_srs EPSG:4326 -r near \"${{file%.nc}}_tmp1.nc\" \"${{file%.nc}}_tmp2.nc\"; done"
             ]
         
         subprocess.run(toref)
@@ -299,29 +324,23 @@ class goes():
             gettime = gettime + timedelta(minutes=5)
             newname = gettime.strftime("%Y%m%d_%H%M_tmp3")
             cdo.settaxis(gettime.strftime("%Y-%m-%d,%H:%M:00,5min"), input=file, options='-f nc4 -r', output=f"./{dirname}/backup/{product}/{newname}.nc")
-            
+        
+        gtime -= timedelta(hours=1)
+        time_str = gtime.strftime("%Y-%m-%d,%H:%M:00,5min")
         if (product == "bd11"):
-            cdo.remapnn('./perm/mygrid', input=f"-setunit,Kelvin -chname,Band1,{product} -mergetime "+f"./{dirname}/backup/{product}/*_tmp3.nc", options='-f nc4', output=f"./{dirname}/backup/{product}.nc")
+            cdo.remapnn('./perm/mygrid', input=f"-settaxis,{time_str} -setunit,Kelvin -chname,Band1,{product} -mergetime ./{dirname}/backup/{product}/*_tmp3.nc", options='-b F32 -f nc4 -r', output=f"./{dirname}/backup/{product}.nc")
         else:
-            cdo.remapnn('./perm/mygrid', input=f"-chname,Band1,{product} -mergetime "+f"./{dirname}/backup/{product}/*_tmp3.nc", options='-f nc4', output=f"./{dirname}/backup/{product}.nc") # -z zip_2
+            cdo.remapnn('./perm/mygrid', input=f"-settaxis,{time_str} -chname,Band1,{product} -mergetime ./{dirname}/backup/{product}/*_tmp3.nc", options='-b F32 -f nc4 -r', output=f"./{dirname}/backup/{product}.nc")
         
         remove = [f"rm ./{dirname}/backup/{product}/*_tmp?.nc"]
         subprocess.run(remove, shell=True)
         
-    def merge_goes(dirname):
-        ds1 = xr.open_dataset(f"./{dirname}/backup/bd02.nc", chunks={'time': 1, 'lat': 2500, 'lon': 6000})
-        ds2 = xr.open_dataset(f"./{dirname}/backup/bd11.nc", chunks={'time': 1, 'lat': 2500, 'lon': 6000})
-        merged_ds = xr.merge([ds1, ds2])
-        merged_ds.to_zarr(f"./{dirname}/goes.zarr", mode='w', consolidated=True)
-        subprocess.run(f"rm ./{dirname}/backup/bd02.nc", shell=True)
-        subprocess.run(f"rm ./{dirname}/backup/bd11.nc", shell=True)
-
 
 
 if __name__ == "__main__":
     st = time.time()
-    stdate_gb = datetime(2021, 10, 1)
-    eddate_gb = datetime(2021, 10, 1)
+    stdate_gb = datetime(2023, 8, 8)    # Start date for getting data (inclusive)
+    eddate_gb = datetime(2023, 8, 8)    # End date for getting data (inclusive)
     step_gb = timedelta(days=1)
     
     for i in range((eddate_gb - stdate_gb).days +1):
@@ -329,10 +348,8 @@ if __name__ == "__main__":
         
         date_cr = stdate_gb + i * step_gb
         hour_cr = np.random.randint(2, 24)
-        minute_cr = np.random.randint(0, 60)
+        minute_cr = np.random.randint(0, 12) * 5
         datetime_cr = date_cr + timedelta(hours=hour_cr, minutes=minute_cr)
-        hrrr_time = datetime_cr - timedelta(hours=2, minutes=hrrr.delaytime)
-        goes_time = datetime_cr - timedelta(minutes=goes.delaytime)
         
         print(datetime_cr.strftime("%Y-%m-%d %H:%M"))
         dirName = datetime_cr.strftime("%Y%m%d_%H%M")
@@ -341,35 +358,43 @@ if __name__ == "__main__":
         tfm_mvil = multiprocessing.Process(target=mrms.mrms, args=(dirName, "VIL_00.50", "vil", datetime_cr, ))
         tfm_rf10 = multiprocessing.Process(target=mrms.mrms, args=(dirName, "Reflectivity_-10C_00.50", "rf-10", datetime_cr, ))
         tfm_rtma = multiprocessing.Process(target=rtma.rtma, args=(dirName, datetime_cr, ))
-        tfm_hrrr = multiprocessing.Process(target=hrrr.hrrr, args=(dirName, hrrr_time, ))
-        tfm_bd02 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd02", 2, goes_time, ))
-        tfm_bd11 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd11", 11, goes_time, ))
+        tfm_hrrr = multiprocessing.Process(target=hrrr.hrrr, args=(dirName, datetime_cr, ))
+        tfm_bd02 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd02", 2, datetime_cr, ))
+        tfm_bd11 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd11", 11, datetime_cr, ))
+        tfm_elev = multiprocessing.Process(target=utils.elev_time, args=(dirName, datetime_cr, ))
         mrge_mrms = multiprocessing.Process(target=mrms.merge_mrms, args=(dirName, ))
-        mrge_goes = multiprocessing.Process(target=goes.merge_goes, args=(dirName, ))
+        mrge_file = multiprocessing.Process(target=utils.merge_ins, args=(dirName, ))
         
         tfm_hrrr.start()
-        tfm_mvil.start()
-        tfm_rf10.start()
-        tfm_rtma.start()
         tfm_bd02.start()
         tfm_bd11.start()
+        tfm_rtma.start()
+        tfm_elev.start()
+        tfm_rf10.start()
+        tfm_mvil.start()
         
         tfm_mvil.join()
         tfm_rf10.join()
         mrge_mrms.start()
         mrge_mrms.join()
         
-        tfm_bd02.join()
-        tfm_bd11.join()
-        mrge_goes.start()
-        mrge_goes.join()
-        
+        tfm_elev.join()
         tfm_rtma.join()
+        tfm_bd11.join()
+        tfm_bd02.join()
         tfm_hrrr.join()
+        
+        mrge_file.start()
+        mrge_file.join()
         shutil.rmtree(f"./{dirName}/backup/")
-
+        et = time.time()
+        ti = et - st
+        print()
+        print(f"{dirName} done in ", ti, "seconds")
+        
+        
     
     et = time.time()
     ti = et - st
     print()
-    print("done in ", ti, "seconds")
+    print("TOTAL: ", ti, "seconds")
