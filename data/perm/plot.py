@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sun Dec 31 01:30:00 UTC 2023
+Created on Thu Dec 28 18:02:55 2023
 
-@author: Atharva Tyagi
+@author: atyagi
 """
+
+# This file plots test data from a dataset, it is meant to be used in the command line as "python plot.py --dir {date_folder}" (you could also do subprocess.run)
+# You can choose to add some options to this, shown below
+# Example usage: python plot.py --dir 20211225_1230 --prod inputs --time 10 --plot --print
 
 import argparse
 import xarray as xr
@@ -15,13 +19,13 @@ import random
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dir', type=str)
-    parser.add_argument('--print', action='store_true')
-    parser.add_argument('--save', action='store_true')
-    parser.add_argument('--plot', action='store_true')
-    parser.add_argument('--prod', type=str, nargs='?')
-    parser.add_argument('--var', type=str, nargs='?')
-    parser.add_argument('--time', type=int, nargs='?')
+    parser.add_argument('--dir', type=str)                    # name of the folder containing the dataset                required
+    parser.add_argument('--print', action='store_true')       # would you like to print variable data?                   optional
+    parser.add_argument('--save', action='store_true')        # would you like to save the plot generated?               optional
+    parser.add_argument('--plot', action='store_true')        # would you like to interactively see your plot?           optional
+    parser.add_argument('--prod', type=str, nargs='?')        # specify to plot inputs or target                         optional
+    parser.add_argument('--var', type=str, nargs='?')         # specify a specific variable to plot                      optional
+    parser.add_argument('--time', type=int, nargs='?')        # specify a specifc variable to plot                       optional
     return parser.parse_args()
 
 def randvar(ds):
@@ -35,13 +39,17 @@ def main():
     args = parse_args()
     
     if args.prod: products = [args.prod]
-    else: products = ['goes', 'mrms', 'rtma', 'hrrr']
+    else: products = ['inputs', 'target']
     
     for prod in products:
         bigds = xr.open_zarr(f"../{args.dir}/{prod}.zarr")
-        if args.var: var_name = args.var
+        if args.var:
+            if args.var in bigds: var_name = args.var
+            else: var_name = randvar(bigds)
         else: var_name = randvar(bigds)
-        if args.time: timestamp = args.time
+        if args.time:
+            if args.time < bigds.dims['time']: timestamp = args.time
+            else: timestamp = randtime(bigds)
         else: timestamp = randtime(bigds)
         vards = bigds[var_name]
         tslice = vards.isel(time=timestamp)
@@ -51,10 +59,10 @@ def main():
         ax.add_feature(cfeature.BORDERS, linestyle=':')
         plt.imshow(tslice, extent=(tslice.lon.min(), tslice.lon.max(), tslice.lat.min(), tslice.lat.max()), origin='lower')
         plt.colorbar()
-        plt.title(f"../{args.dir}/{prod}.zarr: {var_name} @ {timestamp}")
+        plt.title(f"{var_name} @ {timestamp}")
         
         if args.print: print(f"\n{tslice}\n")
-        if args.save: plt.savefig(f"../PLOT_{prod}_{var_name}_{timestamp}.png")
+        if args.save: plt.savefig(f"../{args.dir}_{var_name}_{timestamp}.png")
         if args.plot: plt.show()
 
 if __name__ == "__main__":
