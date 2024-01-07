@@ -3,7 +3,7 @@
 """
 Created on Wed Jan  3 22:50:00 2024
 
-@author: atyagi
+@author: Atharva Tyagi
 """
 
 import argparse
