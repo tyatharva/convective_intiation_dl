@@ -1,0 +1,8 @@
+perm_elev.nc contains the elevation data to be used. The bounds are -132 to -62 degrees longitude and 22 to 52 degrees latitude, so the mygrid specs must be within this domain.
+If you need a bigger domain, visit https://pae-paha.pacioos.hawaii.edu/erddap/griddap/srtm30plus_v11_land.html and get the data you need.
+
+mygrid settings can be set within data.py
+
+plot.py is used to plot test images from the data generated from data.py. Check plot.py for comments on how to use it (it is meant for command line use).
+
+nan.py is used to check for NaN values in the zarr data and provide details about where it is. Check nan.py for how to use it (it is meant for command line use).
