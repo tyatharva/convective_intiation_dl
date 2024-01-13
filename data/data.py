@@ -6,7 +6,14 @@ Created on Sat Dec  9 15:14:33 2023
 @author: Atharva Tyagi
 """
 
-# Requires UNIX os, I reccomend 32 gb of ram and ample storage since output files with the default variables are around 27 gb
+# Requires UNIX, I reccomend a solid amount of storage at at least 32gb of RAM (files can be several dozen gb large)
+# This gets data for the last hour for everything except for MRMS, which is the previous and next hour
+# You can use any MRMS variable you want
+# For GOES, you may need to modify a few things to use different bands
+# For a differnent number of MRMS or GOES variables, you will need to get your hands dirty
+# The data location method to check if the data is there before we attempt to access it covers most but not all missing data situations
+# Please read the directions/settings (most of them are at the bottom in main)
+# I plan to document this better at a later time
 
 import os
 import time
@@ -25,29 +32,6 @@ from herbie import FastHerbie
 from botocore import UNSIGNED
 from botocore.config import Config
 from datetime import datetime, timedelta
-
-s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
-tempPath = './tmp/'
-cdo = Cdo(tempdir=tempPath)
-cdo.cleanTempDir()
-os.environ["REMAP_EXTRAPOLATE"] = "off"
-threads = 16
-gridtype = "lonlat"
-xsize = 4500
-ysize = 2500
-xfirst = -116.1
-xinc = 0.01
-yfirst = 25
-yinc = 0.01
-content = f"""gridtype = {gridtype}
-xsize    = {xsize}
-ysize    = {ysize}
-xfirst   = {xfirst}
-xinc     = {xinc}
-yfirst   = {yfirst}
-yinc     = {yinc}
-"""
-with open("./perm/mygrid", "w") as file: file.write(content)
 
 
 
@@ -71,8 +55,7 @@ class utils():
         if 'Contents' in response:
             files = [obj['Key'] for obj in response['Contents']]
             return files
-        else:
-            return []
+        else: return []
     
     @staticmethod
     def elev_time(dirname, etime):
@@ -87,57 +70,117 @@ class utils():
         cdo.inttime(f"{etime_str}", input=f"-mergetime ./{dirname}/backup/elev/elev0.nc ./{dirname}/backup/elev/elev1.nc", options="-b F32 -f nc4 -r", output=f"./{dirname}/backup/elev.nc")
     
     @staticmethod
-    def merge_ins(dirname):
-        ds1 = xr.open_dataset(f"./{dirname}/backup/bd02.nc", chunks={'time': 1, 'lat': ysize, 'lon': xsize})
-        ds2 = xr.open_dataset(f"./{dirname}/backup/bd11.nc", chunks={'time': 1, 'lat': ysize, 'lon': xsize})
-        ds3 = xr.open_dataset(f"./{dirname}/backup/rtma.nc", chunks={'time': 1, 'lat': ysize, 'lon': xsize})
-        ds4 = xr.open_dataset(f"./{dirname}/backup/hrrr.nc", chunks={'time': 1, 'lat': ysize, 'lon': xsize})
-        ds5 = xr.open_dataset(f"./{dirname}/backup/elev.nc", chunks={'time': 1, 'lat': ysize, 'lon': xsize})
-        ds = xr.merge([ds1, ds2, ds3, ds4, ds5])
-        ds.to_zarr(f"./{dirname}/inputs.zarr", mode='w', consolidated=True)
+    def merge_ins(dirname, ygrd, xgrd):
+        try:
+            ds1 = xr.open_dataset(f"./{dirname}/backup/bd02.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds2 = xr.open_dataset(f"./{dirname}/backup/bd11.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds3 = xr.open_dataset(f"./{dirname}/backup/rtma.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds4 = xr.open_dataset(f"./{dirname}/backup/hrrr.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds5 = xr.open_dataset(f"./{dirname}/backup/elev.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds = xr.merge([ds1, ds2, ds3, ds4, ds5])
+            ds.to_zarr(f"./{dirname}/inputs.zarr", mode='w', consolidated=True)
+        except: pass
+    
+    @staticmethod
+    def locate_data(indate, mrmsprod1, mrmsprod2, delaytime):
+        flag = 1
+        dname = indate.strftime("%Y%m%d_%H%M")
+        indate -= timedelta(minutes=delaytime[1])
+        pdate = indate - timedelta(hours=1)
+        fdate = indate + timedelta(hours=1)
+        pymd = pdate.strftime("%Y%m%d")
+        fymd = fdate.strftime("%Y%m%d")
+        
+        if pymd == fymd:
+            counter = 0
+            doy = str(pdate.timetuple().tm_yday).zfill(3)
+            gyr = pdate.strftime("%Y")
+            prd1 = utils.list_files_s3("noaa-mrms-pds", f"CONUS/{mrmsprod1}/{pymd}/")
+            prd2 = utils.list_files_s3("noaa-mrms-pds", f"CONUS/{mrmsprod2}/{pymd}/")
+            goes = utils.list_files_s3("noaa-goes16", f"ABI-L1b-RadC/{gyr}/{doy}/00/")
+            rtma = utils.list_files_s3("noaa-rtma-pds", f"rtma2p5_ru.{pymd}/")
+            hrrr = utils.list_files_s3("noaa-hrrr-bdp-pds", f"hrrr.{pymd}/conus/")
+            if not prd1: counter+=1
+            if not prd2: counter+=1
+            if not goes: counter+=1
+            if not rtma: counter+=1
+            if not hrrr: counter+=1
+            if counter > 0:
+                relcount = counter/1
+                with open("./warnings.txt", "a") as file: file.write(f"{dname} doesn't exist on AWS ({relcount} pieces missing)" + "\n")
+                flag = 0
+        
+        else:
+            counter = 0
+            doy = str(pdate.timetuple().tm_yday).zfill(3)
+            gyr = pdate.strftime("%Y")
+            pprd1 = utils.list_files_s3("noaa-mrms-pds", f"CONUS/{mrmsprod1}/{pymd}/")
+            pprd2 = utils.list_files_s3("noaa-mrms-pds", f"CONUS/{mrmsprod2}/{pymd}/")
+            pgoes = utils.list_files_s3("noaa-goes16", f"ABI-L1b-RadC/{gyr}/{doy}/00/")
+            prtma = utils.list_files_s3("noaa-rtma-pds", f"rtma2p5_ru.{pymd}/")
+            phrrr = utils.list_files_s3("noaa-hrrr-bdp-pds", f"hrrr.{pymd}/conus/")
+            doy = str(fdate.timetuple().tm_yday).zfill(3)
+            gyr = fdate.strftime("%Y")
+            fprd1 = utils.list_files_s3("noaa-mrms-pds", f"CONUS/{mrmsprod1}/{fymd}/")
+            fprd2 = utils.list_files_s3("noaa-mrms-pds", f"CONUS/{mrmsprod2}/{fymd}/")
+            fgoes = utils.list_files_s3("noaa-goes16", f"ABI-L1b-RadC/{gyr}/{doy}/00/")
+            frtma = utils.list_files_s3("noaa-rtma-pds", f"rtma2p5_ru.{fymd}/")
+            fhrrr = utils.list_files_s3("noaa-hrrr-bdp-pds", f"hrrr.{fymd}/conus/")
+            if not pprd1: counter+=1
+            if not pprd2: counter+=1
+            if not pgoes: counter+=1
+            if not prtma: counter+=1
+            if not phrrr: counter+=1
+            if not fprd1: counter+=1
+            if not fprd2: counter+=1
+            if not fgoes: counter+=1
+            if not frtma: counter+=1
+            if not fhrrr: counter+=1
+            if counter > 0:
+                relcount = counter/2
+                with open("./warnings.txt", "a") as file: file.write(f"{dname} doesn't exist on AWS ({relcount} pieces missing)" + "\n")
+                flag = 0
+                
+        return flag
     
     @staticmethod
     def check_data(dirname):
-        i = 0
-        prods = ["inputs", "target"]
-        for prod in prods:
-            ds = xr.open_zarr(f"./{dirname}/{prod}.zarr")
-            for variable in ds.variables:
-                for timestep in ds.time:
-                    try:
-                        data = ds[variable].sel(time=timestep).values
-                        nan_indices = np.isnan(data)
-                        if np.any(nan_indices):
-                            i += 1
-                    except Exception:
-                        continue
-        if i > 0:
-            with open("./warnings.txt", "a") as file:
-                file.write(f"{dirname} contains NaN" + "\n")
-        inputs_num = 0
-        target_num = 0
-        folder_path = f"./{dirname}/inputs.zarr"
-        for root, dirs, files in os.walk(folder_path): inputs_num += len(files)
-        folder_path = f"./{dirname}/target.zarr"
-        for root, dirs, files in os.walk(folder_path): target_num += len(files)
-        if (inputs_num != 2622 or target_num != 66):
-            with open("./warnings.txt", "a") as file:
-                file.write(f"{dirname} contains {inputs_num} inputs and {target_num} targets" + "\n")
-        print("\n" + f"Done checking {dirname}" + "\n")
+        try:
+            i = 0
+            prods = ["inputs", "target"]
+            for prod in prods:
+                ds = xr.open_zarr(f"./{dirname}/{prod}.zarr")
+                for variable in ds.variables:
+                    for timestep in ds.time:
+                        try:
+                            data = ds[variable].sel(time=timestep).values
+                            nan_indices = np.isnan(data)
+                            if np.any(nan_indices):
+                                i += 1
+                        except: pass
+            if i > 0:
+                with open("./warnings.txt", "a") as file: file.write(f"{dirname} contains NaN" + "\n")
+            inputs_num = 0
+            target_num = 0
+            folder_path = f"./{dirname}/inputs.zarr"
+            for root, dirs, files in os.walk(folder_path): inputs_num += len(files)
+            folder_path = f"./{dirname}/target.zarr"
+            for root, dirs, files in os.walk(folder_path): target_num += len(files)
+            if (inputs_num != 2622 or target_num != 66):
+                with open("./warnings.txt", "a") as file: file.write(f"{dirname} contains {inputs_num} inputs and {target_num} targets" + "\n")
+            print("\n" + f"Done checking {dirname}" + "\n")
+        except:
+            with open("./warnings.txt", "a") as file: file.write(f"{dirname} contains no zarr" + "\n")
 
 
 
 class mrms():
-    
-    delaytime = 3
-    
-    def mrms(dirname, product_long, product_short, mtime):
+
+    def mrms(dirname, product_long, product_short, mtime, delay):
         
-        modtime = mtime - timedelta(minutes=mrms.delaytime)
-        if modtime.minute % 2 == 0:
-            gettime = modtime
-        else:
-            gettime = modtime - timedelta(minutes=1)
+        gettime = mtime - timedelta(minutes=delay[0])
+        modtime = gettime.minute % 2
+        if modtime != 0: gettime -= timedelta(minutes=modtime)
         
         x = 0
         gettim2 = gettime + timedelta(minutes=2)
@@ -195,7 +238,6 @@ class mrms():
         ]
         subprocess.run(mergetime)
         
-        
         gettime += timedelta(minutes=2)
         itime = gettime.strftime("%Y-%m-%d,%H:%M:00")
         cdo.inttime(f"{itime},5min", input=f"-settaxis,{itime},2min -setmisstoc,0 -setrtomiss,-1000,0 ./{dirname}/backup/{product_short}/{product_short}tmp.nc", options='-f nc4 -r', output=f"./{dirname}/backup/{product_short}/{product_short}tmpp.nc")
@@ -223,18 +265,18 @@ class mrms():
         remove = [f"rm ./{dirname}/backup/{product_short}/*.nc"]
         subprocess.run(remove, shell=True)
         
-    def merge_mrms(dirname):
-        ds1 = xr.open_dataset(f"./{dirname}/backup/vil.nc", chunks={'time': 1, 'lat': ysize, 'lon': xsize})
-        ds2 = xr.open_dataset(f"./{dirname}/backup/rf-10.nc", chunks={'time': 1, 'lat': ysize, 'lon': xsize})
-        merged_ds = xr.merge([ds1, ds2])
-        merged_ds.to_zarr(f"./{dirname}/target.zarr", mode='w', consolidated=True)
+    def merge_mrms(dirname, ygrd, xgrd):
+        try:
+            ds1 = xr.open_dataset(f"./{dirname}/backup/vil.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds2 = xr.open_dataset(f"./{dirname}/backup/rf-10.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            merged_ds = xr.merge([ds1, ds2])
+            merged_ds.to_zarr(f"./{dirname}/target.zarr", mode='w', consolidated=True)
+        except: pass
 
 
 
 class hrrr():
-    
-    delaytime = 55
-    
+
     def mfilerdir_hrrr(directory):
         items = os.listdir(directory)
         for item in items:
@@ -248,16 +290,16 @@ class hrrr():
                         new_path = os.path.join(directory, original_folder_name + "_" + new_file_name)
                         shutil.move(file_path, new_path)
                 shutil.rmtree(item_path)
-    
-    def hrrr(dirname, htime):
+                
+    def hrrr(dirname, htime, thds, delay):
         
-        hrtime = htime - timedelta(hours=1, minutes=hrrr.delaytime)
+        hrtime = htime - timedelta(hours=1, minutes=delay[1])
         hrtime = hrtime.replace(minute=0)
         DATES = pd.date_range(start=hrtime.strftime("%Y-%m-%d %H:00"), periods=2, freq="1H",)
         fxx=range(0,1)
-        data = FastHerbie(DATES, model="hrrr", product="prs", fxx=fxx, max_threads=threads,)
+        data = FastHerbie(DATES, model="hrrr", product="prs", fxx=fxx, max_threads=thds,)
         #                       Soil temp and moisture at 0m       Standard vars at 500-1000mb every 25mb and 1013.2mb                                               Wind at 10 and 80m                                                        Equilibrium level           Lowest condensation level           Level of free convection (shows up as no_level sometimes)
-        data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(([5-9][0,2,5,7][0,5])|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(VGTYP)", max_threads=threads, save_dir = f"./{dirname}/backup/")
+        data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(([5-9][0,2,5,7][0,5])|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(VGTYP)", max_threads=thds, save_dir = f"./{dirname}/backup/")
         hrrr.mfilerdir_hrrr(f"./{dirname}/backup/hrrr/")
         
         tonc = [
@@ -274,7 +316,7 @@ class hrrr():
         h2 = hrtime.strftime("%H")
         f1 = glob.glob(f"./{dirname}/backup/hrrr/*t{h1}z*.nc")[0]
         f2 = glob.glob(f"./{dirname}/backup/hrrr/*t{h2}z*.nc")[0]
-        cdo.remapnn("./perm/mygrid", input=f"-settaxis,{stime} -inttime,{ltime} -mergetime {f1} {f2}", options=f"-b F32 -P {threads} -f nc4 -r", output=f"./{dirname}/backup/hrrr.nc")
+        cdo.remapnn("./perm/mygrid", input=f"-settaxis,{stime} -inttime,{ltime} -mergetime {f1} {f2}", options=f"-b F32 -P {thds} -f nc4 -r", output=f"./{dirname}/backup/hrrr.nc")
         
         remove = [f"rm ./{dirname}/backup/hrrr/*.nc"]
         subprocess.run(remove, shell=True)
@@ -282,16 +324,12 @@ class hrrr():
 
 
 class rtma():
-    
-    delaytime = 20
-    
-    def rtma(dirname, rtime):
+
+    def rtma(dirname, rtime, delay):
         
-        gettime = rtime
-        gettime -= timedelta(minutes=rtma.delaytime)
+        gettime = rtime - timedelta(minutes=delay[2])
         remain = gettime.minute % 15
-        if remain != 0:
-            gettime -= timedelta(minutes=remain)
+        if remain != 0: gettime -= timedelta(minutes=remain)
         
         i = 0
         while i < 5:
@@ -321,12 +359,10 @@ class rtma():
 
 
 class goes():
-    
-    delaytime = 5
-    
-    def goes(dirname, product, bandnum, gtime):
+
+    def goes(dirname, product, bandnum, gtime, delay):
         
-        gettime = gtime - timedelta(minutes=goes.delaytime)
+        gettime = gtime - timedelta(minutes=delay[3])
         i = 0
         while i < 13:
             minute_str = gettime.strftime("%M").zfill(2)
@@ -368,10 +404,8 @@ class goes():
         
         gtime -= timedelta(hours=1)
         time_str = gtime.strftime("%Y-%m-%d,%H:%M:00,5min")
-        if (product == "bd11"):
-            cdo.remapnn('./perm/mygrid', input=f"-settaxis,{time_str} -setunit,Kelvin -chname,Band1,{product} -mergetime ./{dirname}/backup/{product}/*_tmp3.nc", options='-b F32 -f nc4 -r', output=f"./{dirname}/backup/{product}.nc")
-        else:
-            cdo.remapnn('./perm/mygrid', input=f"-settaxis,{time_str} -setmisstoc,0 -setrtomiss,-1,0.01 -chname,Band1,{product} -mergetime ./{dirname}/backup/{product}/*_tmp3.nc", options='-b F32 -f nc4 -r', output=f"./{dirname}/backup/{product}.nc")
+        if (product == "bd11"): cdo.remapnn('./perm/mygrid', input=f"-settaxis,{time_str} -setunit,Kelvin -chname,Band1,{product} -mergetime ./{dirname}/backup/{product}/*_tmp3.nc", options='-b F32 -f nc4 -r', output=f"./{dirname}/backup/{product}.nc")
+        else: cdo.remapnn('./perm/mygrid', input=f"-settaxis,{time_str} -setmisstoc,0 -setrtomiss,-1,0.01 -chname,Band1,{product} -mergetime ./{dirname}/backup/{product}/*_tmp3.nc", options="-b F32 -f nc4 -r", output=f"./{dirname}/backup/{product}.nc")
         
         remove = [f"rm ./{dirname}/backup/{product}/*_tmp?.nc"]
         subprocess.run(remove, shell=True)
@@ -379,16 +413,44 @@ class goes():
 
 
 if __name__ == "__main__":
+    
     st = time.time()
-    stdate_gb = datetime(2023, 12, 31)
-    eddate_gb = datetime(2023, 12, 31)
-    step_gb = timedelta(days=1)
+    tout = 270                                                                # Set the timeout time for the processes (you may have to experiment with this based on your system)
+    try: os.remove("./warnings.txt")
+    except: pass
+    try: os.remove("./timings.txt")
+    except: pass
+    os.environ["REMAP_EXTRAPOLATE"] = "off"
+    cdo = Cdo()
+    s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
+    # mrms, hrrr, rtma, goes
+    delaytimes = [3, 55, 20, 5]                                               # Delaytimes for retriving data (meant to simulate realtime)
+    gridtype = "lonlat"                                                       # Grid format (reccomended lat lon)
+    xsize = 4500                                                              # Points in x direction
+    ysize = 2500                                                              # Points in y direction
+    xfirst = -116.1                                                           # Starting (westernmost) longitude
+    xinc = 0.01                                                               # x increment
+    yfirst = 25                                                               # Starting (southernmost) latitude
+    yinc = 0.01                                                               # y increment
+    # The default domain is the largest possible without having NaN values
+    grid_specs = f"""gridtype = {gridtype}
+    xsize    = {xsize}
+    ysize    = {ysize}
+    xfirst   = {xfirst}
+    xinc     = {xinc}
+    yfirst   = {yfirst}
+    yinc     = {yinc}
+    """
+    with open("./perm/mygrid", "w") as file: file.write(grid_specs)
+    
+    stdate_gb = datetime(2023, 8, 8)                                          # Start date (inclusive) for retrieving data
+    eddate_gb = datetime(2023, 8, 8)                                          # End date (inclusive) for retrieving data
+    step_gb = timedelta(days=1)                                               # Timestep
     files_done = 0
     prev_time = datetime(2000, 1, 1, 0, 0)
     prev_dirname = "20000101_0000"
     
     for i in range((eddate_gb - stdate_gb).days +1):
-        cdo.cleanTempDir()
         
         date_cr = stdate_gb + i * step_gb
         hour_cr = np.random.randint(0, 24)
@@ -406,55 +468,58 @@ if __name__ == "__main__":
                 duration_s = duration.total_seconds()
                 mins_diff = divmod(duration_s, 60)[0]
         
-        print(datetime_cr.strftime("%Y-%m-%d %H:%M"))
-        dirName = datetime_cr.strftime("%Y%m%d_%H%M")
-        utils.create_dir(dirName)
-        
-        check = multiprocessing.Process(target=utils.check_data, args=(prev_dirname, ))
-        tfm_mvil = multiprocessing.Process(target=mrms.mrms, args=(dirName, "VIL_00.50", "vil", datetime_cr, ))
-        tfm_rf10 = multiprocessing.Process(target=mrms.mrms, args=(dirName, "Reflectivity_-10C_00.50", "rf-10", datetime_cr, ))
-        tfm_rtma = multiprocessing.Process(target=rtma.rtma, args=(dirName, datetime_cr, ))
-        tfm_hrrr = multiprocessing.Process(target=hrrr.hrrr, args=(dirName, datetime_cr, ))
-        tfm_bd02 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd02", 2, datetime_cr, ))
-        tfm_bd11 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd11", 11, datetime_cr, ))
-        tfm_elev = multiprocessing.Process(target=utils.elev_time, args=(dirName, datetime_cr, ))
-        mrge_mrms = multiprocessing.Process(target=mrms.merge_mrms, args=(dirName, ))
-        mrge_file = multiprocessing.Process(target=utils.merge_ins, args=(dirName, ))
-        
-        if files_done > 0: check.start()
-        tfm_hrrr.start()
-        tfm_bd02.start()
-        tfm_bd11.start()
-        tfm_rtma.start()
-        tfm_elev.start()
-        tfm_rf10.start()
-        tfm_mvil.start()
-        
-        tfm_mvil.join()
-        tfm_rf10.join()
-        mrge_mrms.start()
-        mrge_mrms.join()
-        
-        if files_done > 0: check.join()
-        tfm_elev.join()
-        tfm_rtma.join()
-        tfm_bd11.join()
-        tfm_bd02.join()
-        tfm_hrrr.join()
-        
-        mrge_file.start()
-        mrge_file.join()
-        shutil.rmtree(f"./{dirName}/backup/")
-        et = time.time()
-        ti = et - st
-        print()
-        print(f"{dirName} done in ", ti, "seconds")
-        prev_time = datetime_cr
-        prev_dirname = dirName
-        files_done += 1
+        if utils.locate_data(datetime_cr, "VIL_00.50", "Reflectivity_-10C_00.50", delaytimes) == 1:
+            lst = time.time()
+            print("\n" + datetime_cr.strftime("%Y-%m-%d %H:%M") + " has been found\n")
+            dirName = datetime_cr.strftime("%Y%m%d_%H%M")
+            utils.create_dir(dirName)
+            
+            check = multiprocessing.Process(target=utils.check_data, args=(prev_dirname, ))
+            tfm_mvil = multiprocessing.Process(target=mrms.mrms, args=(dirName, "VIL_00.50", "vil", datetime_cr, delaytimes, ))
+            tfm_rf10 = multiprocessing.Process(target=mrms.mrms, args=(dirName, "Reflectivity_-10C_00.50", "rf-10", datetime_cr, delaytimes, ))
+            tfm_rtma = multiprocessing.Process(target=rtma.rtma, args=(dirName, datetime_cr, delaytimes, ))
+            tfm_hrrr = multiprocessing.Process(target=hrrr.hrrr, args=(dirName, datetime_cr, 16, delaytimes, ))
+            tfm_bd02 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd02", 2, datetime_cr, delaytimes, ))
+            tfm_bd11 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd11", 11, datetime_cr, delaytimes, ))
+            tfm_elev = multiprocessing.Process(target=utils.elev_time, args=(dirName, datetime_cr, ))
+            mrge_mrms = multiprocessing.Process(target=mrms.merge_mrms, args=(dirName, ysize, xsize, ))
+            mrge_file = multiprocessing.Process(target=utils.merge_ins, args=(dirName, ysize, xsize, ))
+            
+            tfm_hrrr.start()
+            tfm_bd02.start()
+            tfm_bd11.start()
+            tfm_rtma.start()
+            tfm_rf10.start()
+            tfm_mvil.start()
+            tfm_elev.start()
+            if files_done > 0: check.start()
+            
+            if files_done > 0: check.join(tout)
+            tfm_elev.join(tout)
+            tfm_mvil.join(tout)
+            tfm_rf10.join(tout)
+            tfm_rtma.join(tout)
+            tfm_bd11.join(tout)
+            tfm_bd02.join(tout)
+            tfm_hrrr.join(tout)
+            
+            mrge_mrms.start()
+            mrge_file.start()
+            mrge_mrms.join(tout)
+            mrge_file.join(tout)
+            shutil.rmtree(f"./{dirName}/backup/") # keep or remove backup (backup provides processed netcdf files and original files from AWS, keep in mind that this around triples the storage needed)
+            let = time.time()
+            lti = let - lst
+            timing = f"{dirName} done in {lti} seconds\n"
+            with open("./timings.txt", "a") as file: file.write(timing)
+            print("\n" + timing)
+            prev_time = datetime_cr
+            prev_dirname = dirName
+            files_done += 1
+            
+        else: print("\n" + datetime_cr.strftime("%Y-%m-%d %H:%M") + " does not exist\n")
     
-    utils.check_data(prev_dirname)
+    if files_done > 0: utils.check_data(prev_dirname)
     et = time.time()
     ti = et - st
-    print()
-    print(f"Completed {files_done} files in ", ti, "seconds")
+    print("\n" + f"Completed {files_done} files in ", ti, "seconds\n")
