@@ -116,7 +116,7 @@ class utils():
             gyr = pdate.strftime("%Y")
             pprd1 = utils.list_files_s3("noaa-mrms-pds", f"CONUS/{mrmsprod1}/{pymd}/")
             pprd2 = utils.list_files_s3("noaa-mrms-pds", f"CONUS/{mrmsprod2}/{pymd}/")
-            pgoes = utils.list_files_s3("noaa-goes16", f"ABI-L1b-RadC/{gyr}/{doy}/00/")
+            pgoes = utils.list_files_s3("noaa-goes16", f"ABI-L1b-RadC/{gyr}/{doy}/23/")
             prtma = utils.list_files_s3("noaa-rtma-pds", f"rtma2p5_ru.{pymd}/")
             phrrr = utils.list_files_s3("noaa-hrrr-bdp-pds", f"hrrr.{pymd}/conus/")
             doy = str(fdate.timetuple().tm_yday).zfill(3)
@@ -405,7 +405,7 @@ class goes():
         gtime -= timedelta(hours=1)
         time_str = gtime.strftime("%Y-%m-%d,%H:%M:00,5min")
         if (product == "bd11"): cdo.remapnn('./perm/mygrid', input=f"-settaxis,{time_str} -setunit,Kelvin -chname,Band1,{product} -mergetime ./{dirname}/backup/{product}/*_tmp3.nc", options='-b F32 -f nc4 -r', output=f"./{dirname}/backup/{product}.nc")
-        else: cdo.remapnn('./perm/mygrid', input=f"-settaxis,{time_str} -setmisstoc,0 -setrtomiss,-1,0.01 -chname,Band1,{product} -mergetime ./{dirname}/backup/{product}/*_tmp3.nc", options="-b F32 -f nc4 -r", output=f"./{dirname}/backup/{product}.nc")
+        else: cdo.remapnn('./perm/mygrid', input=f"-settaxis,{time_str} -setmisstoc,1 -setrtomiss,1,10 -setmisstoc,0 -setrtomiss,-1,0.01 -chname,Band1,{product} -mergetime ./{dirname}/backup/{product}/*_tmp3.nc", options="-b F32 -f nc4 -r", output=f"./{dirname}/backup/{product}.nc")
         
         remove = [f"rm ./{dirname}/backup/{product}/*_tmp?.nc"]
         subprocess.run(remove, shell=True)
