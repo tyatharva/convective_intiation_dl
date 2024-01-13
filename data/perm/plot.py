@@ -15,14 +15,14 @@ import random
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dir', type=str)
-    parser.add_argument('--print', action='store_true')
-    parser.add_argument('--save', action='store_true')
-    parser.add_argument('--plot', action='store_true')
-    parser.add_argument('--prod', type=str, nargs='?')
-    parser.add_argument('--var', type=str, nargs='?')
-    parser.add_argument('--time', type=int, nargs='?')
-    return parser.parse_args()
+    parser.add_argument('--dir', type=str)                            # Required, specify the data directory's name (ex. --dir 20230808_0150)
+    parser.add_argument('--print', action='store_true')               # Print information about the variables being plotted (ex. --print)
+    parser.add_argument('--save', action='store_true')                # Save the plots to the data folder (ex. --save)
+    parser.add_argument('--plot', action='store_true')                # Plot the data with matplotlib (ex. --plot)
+    parser.add_argument('--prod', type=str, nargs='?')                # Specify whether to plot inputs or target, default is to plot both (ex. --prod inputs)
+    parser.add_argument('--var', type=str, nargs='?')                 # Specify a specific variable to plot (ex. --var bd02)
+    parser.add_argument('--time', type=int, nargs='?')                # Specify a specific timestep to plot (ex. --time 9)
+    return parser.parse_args()                                        # Example: python plot.py --dir 20230808_0150 --print --plot --prod inputs --var bd02
 
 def randvar(ds):
     variables = [var for var in ds.variables if var not in ['time', 'lat', 'lon']]
@@ -52,7 +52,8 @@ def main():
         
         ax = plt.axes(projection=ccrs.PlateCarree())
         ax.coastlines()
-        ax.add_feature(cfeature.BORDERS, linestyle=':')
+        ax.add_feature(cfeature.BORDERS, linestyle='--')
+        ax.add_feature(cfeature.STATES, linestyle=':')
         plt.imshow(tslice, extent=(tslice.lon.min(), tslice.lon.max(), tslice.lat.min(), tslice.lat.max()), origin='lower')
         plt.colorbar()
         plt.title(f"{var_name} @ {timestamp}")
