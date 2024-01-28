@@ -6,14 +6,23 @@ Created on Sat Dec  9 15:14:33 2023
 @author: Atharva Tyagi
 """
 
-# Requires UNIX, I reccomend a solid amount of storage at at least 32gb of RAM (files can be several dozen gb large)
+# Requires UNIX, I reccomend a decent amount of free storage at at least 16gb of RAM
 # This gets data for the last hour for everything except for MRMS, which is the previous and next hour
-# You can use any MRMS variable you want
+# You can use any MRMS variable you want but you will have to mess with the code if you are not using the defaults
 # For GOES, you may need to modify a few things to use different bands
 # For a differnent number of MRMS or GOES variables, you will need to get your hands dirty
 # The data location method to check if the data is there before we attempt to access it covers most but not all missing data situations
 # Please read the directions/settings (most of them are at the bottom in main)
 # I plan to document this better at a later time
+
+# How to run:
+# Open in terminal
+# cd into directory
+# python data.py --start {start date as %Y%m%d} --end {end date as %Y%m%d}
+# add --backup to the end if you want to keep backup netCDF files
+# Example: python data.py --start 20230808 --end 20230808 --backup
+# This gets data for only 8/8/23 at a random time keeping backup
+# You will have to mess around with the code if you want more options
 
 import os
 import time
@@ -22,6 +31,7 @@ import gzip
 import boto3
 import shutil
 import fnmatch
+import argparse
 import subprocess
 import multiprocessing
 import numpy as np
@@ -38,9 +48,18 @@ from datetime import datetime, timedelta
 class utils():
     
     @staticmethod
+    def parse_args():
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--backup', action='store_true')
+        parser.add_argument('--start', required=True)
+        parser.add_argument('--end', required=True)
+        return parser.parse_args()
+    
+    @staticmethod
     def create_dir(folder_name):
         current_directory = os.getcwd()
-        main_folder_path = os.path.join(current_directory, folder_name)
+        parent_directory = os.path.abspath(os.path.join(current_directory, '..'))
+        main_folder_path = os.path.join(parent_directory, folder_name)
         os.makedirs(main_folder_path, exist_ok=True)
         backup_folder_path = os.path.join(main_folder_path, 'backup')
         os.makedirs(backup_folder_path, exist_ok=True)
@@ -59,26 +78,26 @@ class utils():
     
     @staticmethod
     def elev_time(dirname, etime):
-        cdo.remapnn("./perm/mygrid", input="-setmisstoc,0 ./perm/perm_elev.nc", options="-f nc4", output=f"./{dirname}/backup/elev/og_elev.nc")
+        cdo.remapnn("./mygrid", input="-setmisstoc,0 ./perm_elev.nc", options="-f nc4", output=f"../{dirname}/backup/elev/og_elev.nc")
         etime -= timedelta(hours=2)
         for i in range(2):
             etime += timedelta(hours=1)
             etime_str = etime.strftime("%Y-%m-%d,%H:%M:00,5min")
-            cdo.settaxis(f"{etime_str}", input=f"./{dirname}/backup/elev/og_elev.nc", options="-f nc4 -r", output=f"./{dirname}/backup/elev/elev{i}.nc")
+            cdo.settaxis(f"{etime_str}", input=f"../{dirname}/backup/elev/og_elev.nc", options="-f nc4 -r", output=f"../{dirname}/backup/elev/elev{i}.nc")
         etime -= timedelta(hours=1)
         etime_str = etime.strftime("%Y-%m-%d,%H:%M:00,5min")
-        cdo.inttime(f"{etime_str}", input=f"-mergetime ./{dirname}/backup/elev/elev0.nc ./{dirname}/backup/elev/elev1.nc", options="-b F32 -f nc4 -r", output=f"./{dirname}/backup/elev.nc")
+        cdo.inttime(f"{etime_str}", input=f"-mergetime ../{dirname}/backup/elev/elev0.nc ../{dirname}/backup/elev/elev1.nc", options="-b F32 -f nc4 -r", output=f"../{dirname}/backup/elev.nc")
     
     @staticmethod
     def merge_ins(dirname, ygrd, xgrd):
         try:
-            ds1 = xr.open_dataset(f"./{dirname}/backup/bd02.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
-            ds2 = xr.open_dataset(f"./{dirname}/backup/bd11.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
-            ds3 = xr.open_dataset(f"./{dirname}/backup/rtma.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
-            ds4 = xr.open_dataset(f"./{dirname}/backup/hrrr.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
-            ds5 = xr.open_dataset(f"./{dirname}/backup/elev.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds1 = xr.open_dataset(f"../{dirname}/backup/bd02.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds2 = xr.open_dataset(f"../{dirname}/backup/bd11.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds3 = xr.open_dataset(f"../{dirname}/backup/rtma.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds4 = xr.open_dataset(f"../{dirname}/backup/hrrr.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds5 = xr.open_dataset(f"../{dirname}/backup/elev.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
             ds = xr.merge([ds1, ds2, ds3, ds4, ds5])
-            ds.to_zarr(f"./{dirname}/inputs.zarr", mode='w', consolidated=True)
+            ds.to_zarr(f"../{dirname}/inputs.zarr", mode='w', consolidated=True)
         except: pass
     
     @staticmethod
@@ -107,7 +126,7 @@ class utils():
             if not hrrr: counter+=1
             if counter > 0:
                 relcount = counter/1
-                with open("./warnings.txt", "a") as file: file.write(f"{dname} doesn't exist on AWS ({relcount} pieces missing)" + "\n")
+                with open("../info/warnings.txt", "a") as file: file.write(f"{dname} doesn't exist on AWS ({relcount} pieces missing)" + "\n")
                 flag = 0
         
         else:
@@ -138,7 +157,7 @@ class utils():
             if not fhrrr: counter+=1
             if counter > 0:
                 relcount = counter/2
-                with open("./warnings.txt", "a") as file: file.write(f"{dname} doesn't exist on AWS ({relcount} pieces missing)" + "\n")
+                with open("../info/warnings.txt", "a") as file: file.write(f"{dname} doesn't exist on AWS ({relcount} pieces missing)" + "\n")
                 flag = 0
                 
         return flag
@@ -148,7 +167,7 @@ class utils():
         try:
             i = 0
             for prod in ["inputs", "mrms"]:
-                ds = xr.open_zarr(f"./{dirname}/{prod}.zarr")
+                ds = xr.open_zarr(f"../{dirname}/{prod}.zarr")
                 for variable in ds.variables:
                     for timestep in ds.time:
                         try:
@@ -158,39 +177,20 @@ class utils():
                                 i += 1
                         except: pass
             if i > 0:
-                with open("./warnings.txt", "a") as file: file.write(f"{dirname} contains NaN" + "\n")
+                with open("../info/warnings.txt", "a") as file: file.write(f"{dirname} contains NaN" + "\n")
             inputs_num = 0
             target_num = 0
-            folder_path = f"./{dirname}/inputs.zarr"
+            folder_path = f"../{dirname}/inputs.zarr"
             for root, dirs, files in os.walk(folder_path): inputs_num += len(files)
-            folder_path = f"./{dirname}/mrms.zarr"
+            folder_path = f"../{dirname}/mrms.zarr"
             for root, dirs, files in os.walk(folder_path): target_num += len(files)
             if (inputs_num != 2622 or target_num != 66):
                 i+=1
-                with open("./warnings.txt", "a") as file: file.write(f"{dirname} contains {inputs_num} inputs and {target_num} targets" + "\n")
-            if i==0:
-                ds = xr.open_zarr(f"./{dirname}/mrms.zarr")
-                newds = xr.Dataset()
-                tpar = []
-                for i in range(12):
-                    dwvi = ds["VIL_500mabovemeansealevel"].isel(time=i)
-                    upvi = ds["VIL_500mabovemeansealevel"].isel(time=i+13)                # Edit time threshold for VIL
-                    dwrf = ds["ReflectivityM10C_500mabovemeansealevel"].isel(time=i)
-                    uprf = ds["ReflectivityM10C_500mabovemeansealevel"].isel(time=i+13)   # Edit time threshold for -10 c ref
-                    tpvi = xr.where((upvi - dwvi) >= 10, 1, 0)                            # default 10 kg/m^2 over 30mins threshold for VIL
-                    tprf = xr.where((uprf - dwrf) >= 20, 1, 0)                            # default 20 dBz over 30mins threshold for -10 c ref
-                    targ = xr.where((tpvi == 1) & (tprf == 1), 1, 0)
-                    tpar.append(targ)
-                time_coords = ds["time"].isel(time=slice(13, 25))
-                newds["time"] = time_coords
-                newds["target"] = xr.concat(tpar, dim="time")
-                instances = newds["target"].sum().compute()
-                with open("./instances.txt", "a") as file: file.write(f"Instances of convective initiation in {dirname}: {instances.values}" + "\n")
-                newds.to_zarr(f"./{dirname}/target.zarr", mode='w', consolidated=True)
-                if remove: shutil.rmtree(f"./{dirname}/mrms.zarr/")
-                print("\n" + f"Done processing {dirname}" + "\n")
+                with open("../info/warnings.txt", "a") as file: file.write(f"{dirname} contains {inputs_num} inputs and {target_num} targets" + "\n")
+            print("\n" + f"Done processing {dirname}" + "\n")
         except:
-            with open("./warnings.txt", "a") as file: file.write(f"{dirname} contains no zarr" + "\n")
+            with open("../info/warnings.txt", "a") as file: file.write(f"{dirname} contains no zarr" + "\n")
+            print("\n" + f"Done processing {dirname}" + "\n")
 
 
 
@@ -214,7 +214,7 @@ class mrms():
                 file_down = matching_files[0]
                 file_pt1 = gettim2.strftime("%Y%m%d-%H%M")
                 file_newname = f"{product_short}_{file_pt1}.grib2.gz"
-                s3.download_file("noaa-mrms-pds", file_down, f"./{dirname}/backup/{product_short}/{file_newname}")
+                s3.download_file("noaa-mrms-pds", file_down, f"../{dirname}/backup/{product_short}/{file_newname}")
                 print(f"{file_newname} downloaded successfully.")
                 x += 1
             gettim2 += timedelta(minutes=2)
@@ -230,12 +230,12 @@ class mrms():
                 file_down = matching_files[0]
                 file_pt1 = gettime.strftime("%Y%m%d-%H%M")
                 file_newname = f"{product_short}_{file_pt1}.grib2.gz"
-                s3.download_file("noaa-mrms-pds", file_down, f"./{dirname}/backup/{product_short}/{file_newname}")
+                s3.download_file("noaa-mrms-pds", file_down, f"../{dirname}/backup/{product_short}/{file_newname}")
                 print(f"{file_newname} downloaded successfully.")
                 i += 1
             gettime -= timedelta(minutes=2)
         
-        files_to_process = glob.glob(f"./{dirname}/backup/{product_short}/*.gz")
+        files_to_process = glob.glob(f"../{dirname}/backup/{product_short}/*.gz")
         files_to_process = sorted(files_to_process)
 
         for file in files_to_process:
@@ -245,7 +245,7 @@ class mrms():
         
         tonc = [
             "bash", "-c",
-            f"for file in ./{dirname}/backup/{product_short}/*.grib2; do wgrib2 \"$file\" -nc4 -netcdf \"${{file%.grib2}}.nc\"; done"
+            f"for file in ../{dirname}/backup/{product_short}/*.grib2; do wgrib2 \"$file\" -nc4 -netcdf \"${{file%.grib2}}.nc\"; done"
         ]
         subprocess.run(tonc)
         
@@ -253,14 +253,14 @@ class mrms():
             "cdo",
             "-f", "nc4",
             "mergetime",
-            f"./{dirname}/backup/{product_short}/*.nc",
-            f"./{dirname}/backup/{product_short}/{product_short}tmp.nc"
+            f"../{dirname}/backup/{product_short}/*.nc",
+            f"../{dirname}/backup/{product_short}/{product_short}tmp.nc"
         ]
         subprocess.run(mergetime)
         
         gettime += timedelta(minutes=2)
         itime = gettime.strftime("%Y-%m-%d,%H:%M:00")
-        cdo.inttime(f"{itime},5min", input=f"-settaxis,{itime},2min -setmisstoc,0 -setrtomiss,-1000,0 ./{dirname}/backup/{product_short}/{product_short}tmp.nc", options='-f nc4 -r', output=f"./{dirname}/backup/{product_short}/{product_short}tmpp.nc")
+        cdo.inttime(f"{itime},5min", input=f"-settaxis,{itime},2min -setmisstoc,0 -setrtomiss,-1000,0 ../{dirname}/backup/{product_short}/{product_short}tmp.nc", options='-f nc4 -r', output=f"../{dirname}/backup/{product_short}/{product_short}tmpp.nc")
         
         tmptime = mtime - timedelta(hours=1)
         stime = tmptime.strftime("%Y-%m-%d,%H:%M:00,5min")
@@ -268,29 +268,29 @@ class mrms():
             "cdo",
             "-f", "nc4", "-r",
             f"settaxis,{stime}",
-            f"./{dirname}/backup/{product_short}/{product_short}tmpp.nc",
-            f"./{dirname}/backup/{product_short}/{product_short}tmppp.nc"
+            f"../{dirname}/backup/{product_short}/{product_short}tmpp.nc",
+            f"../{dirname}/backup/{product_short}/{product_short}tmppp.nc"
         ]
         subprocess.run(settaxis)
         
         remap = [
             "cdo",
             "-b", "F32", "-f", "nc4",
-            "remapnn,./perm/mygrid",
-            f"./{dirname}/backup/{product_short}/{product_short}tmppp.nc",
-            f"./{dirname}/backup/{product_short}.nc"
+            "remapnn,./mygrid",
+            f"../{dirname}/backup/{product_short}/{product_short}tmppp.nc",
+            f"../{dirname}/backup/{product_short}.nc"
         ]
         subprocess.run(remap)
         
-        remove = [f"rm ./{dirname}/backup/{product_short}/*.nc"]
+        remove = [f"rm ../{dirname}/backup/{product_short}/*.nc"]
         subprocess.run(remove, shell=True)
         
     def merge_mrms(dirname, ygrd, xgrd):
         try:
-            ds1 = xr.open_dataset(f"./{dirname}/backup/vil.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
-            ds2 = xr.open_dataset(f"./{dirname}/backup/rf-10.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds1 = xr.open_dataset(f"../{dirname}/backup/vil.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
+            ds2 = xr.open_dataset(f"../{dirname}/backup/rf-10.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
             ds = xr.merge([ds1, ds2])
-            ds.to_zarr(f"./{dirname}/mrms.zarr", mode='w', consolidated=True)
+            ds.to_zarr(f"../{dirname}/mrms.zarr", mode='w', consolidated=True)
         except: pass
 
 
@@ -319,12 +319,12 @@ class hrrr():
         fxx=range(0,1)
         data = FastHerbie(DATES, model="hrrr", product="prs", fxx=fxx, max_threads=thds,)
         #                       Soil temp and moisture at 0m       Standard vars at 500-1000mb every 25mb and 1013.2mb                                               Wind at 10 and 80m                                                        Equilibrium level           Lowest condensation level           Level of free convection (shows up as no_level sometimes)
-        data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(([5-9][0,2,5,7][0,5])|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(VGTYP)", max_threads=thds, save_dir = f"./{dirname}/backup/")
-        hrrr.mfilerdir_hrrr(f"./{dirname}/backup/hrrr/")
+        data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(([5-9][0,2,5,7][0,5])|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(VGTYP)", max_threads=thds, save_dir = f"../{dirname}/backup/")
+        hrrr.mfilerdir_hrrr(f"../{dirname}/backup/hrrr/")
         
         tonc = [
             "bash", "-c",
-            f"for file in ./{dirname}/backup/hrrr/*.grib2; do wgrib2 \"$file\" -nc4 -netcdf \"${{file%.grib2}}.nc\"; done"
+            f"for file in ../{dirname}/backup/hrrr/*.grib2; do wgrib2 \"$file\" -nc4 -netcdf \"${{file%.grib2}}.nc\"; done"
         ]
         subprocess.run(tonc)
         
@@ -334,11 +334,11 @@ class hrrr():
         h1 = hrtime.strftime("%H")
         hrtime += timedelta(hours=1)
         h2 = hrtime.strftime("%H")
-        f1 = glob.glob(f"./{dirname}/backup/hrrr/*t{h1}z*.nc")[0]
-        f2 = glob.glob(f"./{dirname}/backup/hrrr/*t{h2}z*.nc")[0]
-        cdo.remapnn("./perm/mygrid", input=f"-settaxis,{stime} -inttime,{ltime} -mergetime {f1} {f2}", options=f"-b F32 -P {thds} -f nc4 -r", output=f"./{dirname}/backup/hrrr.nc")
+        f1 = glob.glob(f"../{dirname}/backup/hrrr/*t{h1}z*.nc")[0]
+        f2 = glob.glob(f"../{dirname}/backup/hrrr/*t{h2}z*.nc")[0]
+        cdo.remapnn("./mygrid", input=f"-settaxis,{stime} -inttime,{ltime} -mergetime {f1} {f2}", options=f"-b F32 -P {thds} -f nc4 -r", output=f"../{dirname}/backup/hrrr.nc")
         
-        remove = [f"rm ./{dirname}/backup/hrrr/*.nc"]
+        remove = [f"rm ../{dirname}/backup/hrrr/*.nc"]
         subprocess.run(remove, shell=True)
 
 
@@ -355,13 +355,13 @@ class rtma():
         while i < 5:
             date_str = gettime.strftime("%Y%m%d")
             time_str = gettime.strftime("%H%M")
-            s3.download_file("noaa-rtma-pds", f"rtma2p5_ru.{date_str}/rtma2p5_ru.t{time_str}z.2dvaranl_ndfd.grb2", f"./{dirname}/backup/rtma/rtma_{date_str}_{time_str}.grb2")
+            s3.download_file("noaa-rtma-pds", f"rtma2p5_ru.{date_str}/rtma2p5_ru.t{time_str}z.2dvaranl_ndfd.grb2", f"../{dirname}/backup/rtma/rtma_{date_str}_{time_str}.grb2")
             gettime -= timedelta(minutes=15)
             i += 1
         
         tonc = [
             "bash", "-c",
-            f"for file in ./{dirname}/backup/rtma/*.grb2; do wgrib2 \"$file\" -nc4 -netcdf \"${{file%.grb2}}.nc\"; done"
+            f"for file in ../{dirname}/backup/rtma/*.grb2; do wgrib2 \"$file\" -nc4 -netcdf \"${{file%.grb2}}.nc\"; done"
         ]
         subprocess.run(tonc)
         
@@ -371,9 +371,9 @@ class rtma():
         tretime = rtime - timedelta(hours=1)
         ftim_str = tretime.strftime("%Y-%m-%d,%H:%M:00,5min")
         
-        cdo.settaxis(f"{ftim_str}", input=f"-inttime,{ttim_str} -remapnn,./perm/mygrid -chname,DPT_2maboveground,rtma_DPT_2maboveground,GUST_10maboveground,rtma_GUST_10maboveground,PRES_surface,rtma_PRES_surface,TMP_2maboveground,rtma_TMP_2maboveground,UGRD_10maboveground,rtma_UGRD_10maboveground,VGRD_10maboveground,rtma_VGRD_10maboveground -delname,HGT_surface,CEIL_cloudceiling,TCDC_entireatmosphere_consideredasasinglelayer_,VIS_surface,WDIR_10maboveground,WIND_10maboveground,SPFH_2maboveground -mergetime ./{dirname}/backup/rtma/*.nc", options='-b F32 -f nc4 -r', output=f"./{dirname}/backup/rtma.nc")
+        cdo.settaxis(f"{ftim_str}", input=f"-inttime,{ttim_str} -remapnn,./mygrid -chname,DPT_2maboveground,rtma_DPT_2maboveground,GUST_10maboveground,rtma_GUST_10maboveground,PRES_surface,rtma_PRES_surface,TMP_2maboveground,rtma_TMP_2maboveground,UGRD_10maboveground,rtma_UGRD_10maboveground,VGRD_10maboveground,rtma_VGRD_10maboveground -delname,HGT_surface,CEIL_cloudceiling,TCDC_entireatmosphere_consideredasasinglelayer_,VIS_surface,WDIR_10maboveground,WIND_10maboveground,SPFH_2maboveground -mergetime ../{dirname}/backup/rtma/*.nc", options='-b F32 -f nc4 -r', output=f"../{dirname}/backup/rtma.nc")
         
-        remove = [f"rm ./{dirname}/backup/rtma/*.nc"]
+        remove = [f"rm ../{dirname}/backup/rtma/*.nc"]
         subprocess.run(remove, shell=True)
 
 
@@ -396,7 +396,7 @@ class goes():
             if matching_files:
                 file_down = matching_files[0]
                 file_newname = gettime.strftime("%Y%m%d-%H%M.nc")
-                s3.download_file("noaa-goes16", file_down, f"./{dirname}/backup/{product}/{file_newname}")
+                s3.download_file("noaa-goes16", file_down, f"../{dirname}/backup/{product}/{file_newname}")
                 print(f"{product} {file_newname} downloaded successfully.")
                 i += 1
             gettime -= timedelta(minutes=1)
@@ -404,30 +404,30 @@ class goes():
         if (product == "bd11"):
             toref = [
                 "bash", "-c",
-                f"for file in ./{dirname}/backup/bd11/*.nc; do cdo -f nc4 expr,'bright=(planck_fk2/(log((planck_fk1/Rad)+1))-planck_bc1)/planck_bc2;' \"$file\" \"${{file%.nc}}_tmp1.nc\" && gdalwarp -q -s_srs \"+proj=geos +h=35786023.0 +a=6378137.0 +b=6356752.31414 +f=0.0033528106647475126 +lon_0=-75.0 +sweep=x +no_defs\" -t_srs EPSG:4326 -r near \"${{file%.nc}}_tmp1.nc\" \"${{file%.nc}}_tmp2.nc\"; done"
+                f"for file in ../{dirname}/backup/bd11/*.nc; do cdo -f nc4 expr,'bright=(planck_fk2/(log((planck_fk1/Rad)+1))-planck_bc1)/planck_bc2;' \"$file\" \"${{file%.nc}}_tmp1.nc\" && gdalwarp -q -s_srs \"+proj=geos +h=35786023.0 +a=6378137.0 +b=6356752.31414 +f=0.0033528106647475126 +lon_0=-75.0 +sweep=x +no_defs\" -t_srs EPSG:4326 -r near \"${{file%.nc}}_tmp1.nc\" \"${{file%.nc}}_tmp2.nc\"; done"
             ]
         
         else:
             toref = [
                 "bash", "-c",
-                f"for file in ./{dirname}/backup/bd02/*.nc; do cdo -f nc4 expr,'2ref=kappa0*Rad;' \"$file\" \"${{file%.nc}}_tmp1.nc\" && gdalwarp -q -s_srs \"+proj=geos +h=35786023.0 +a=6378137.0 +b=6356752.31414 +f=0.0033528106647475126 +lon_0=-75.0 +sweep=x +no_defs\" -t_srs EPSG:4326 -r near \"${{file%.nc}}_tmp1.nc\" \"${{file%.nc}}_tmp2.nc\"; done"
+                f"for file in ../{dirname}/backup/bd02/*.nc; do cdo -f nc4 expr,'2ref=kappa0*Rad;' \"$file\" \"${{file%.nc}}_tmp1.nc\" && gdalwarp -q -s_srs \"+proj=geos +h=35786023.0 +a=6378137.0 +b=6356752.31414 +f=0.0033528106647475126 +lon_0=-75.0 +sweep=x +no_defs\" -t_srs EPSG:4326 -r near \"${{file%.nc}}_tmp1.nc\" \"${{file%.nc}}_tmp2.nc\"; done"
             ]
         
         subprocess.run(toref)
         
-        files = glob.glob(f"./{dirname}/backup/{product}/*_tmp2.nc")
+        files = glob.glob(f"../{dirname}/backup/{product}/*_tmp2.nc")
         files = sorted(files)
         for file in files:
             gettime = gettime + timedelta(minutes=5)
             newname = gettime.strftime("%Y%m%d_%H%M_tmp3")
-            cdo.settaxis(gettime.strftime("%Y-%m-%d,%H:%M:00,5min"), input=f"{file}", options='-f nc4 -r', output=f"./{dirname}/backup/{product}/{newname}.nc")
+            cdo.settaxis(gettime.strftime("%Y-%m-%d,%H:%M:00,5min"), input=f"{file}", options='-f nc4 -r', output=f"../{dirname}/backup/{product}/{newname}.nc")
         
         gtime -= timedelta(hours=1)
         time_str = gtime.strftime("%Y-%m-%d,%H:%M:00,5min")
-        if (product == "bd11"): cdo.remapnn('./perm/mygrid', input=f"-settaxis,{time_str} -setunit,Kelvin -chname,Band1,{product} -mergetime ./{dirname}/backup/{product}/*_tmp3.nc", options='-b F32 -f nc4 -r', output=f"./{dirname}/backup/{product}.nc")
-        else: cdo.remapnn('./perm/mygrid', input=f"-settaxis,{time_str} -setmisstoc,1 -setrtomiss,1,10 -setmisstoc,0 -setrtomiss,-1,0.01 -chname,Band1,{product} -mergetime ./{dirname}/backup/{product}/*_tmp3.nc", options="-b F32 -f nc4 -r", output=f"./{dirname}/backup/{product}.nc")
+        if (product == "bd11"): cdo.remapnn('./mygrid', input=f"-settaxis,{time_str} -setunit,Kelvin -chname,Band1,{product} -mergetime ../{dirname}/backup/{product}/*_tmp3.nc", options='-b F32 -f nc4 -r', output=f"../{dirname}/backup/{product}.nc")
+        else: cdo.remapnn('./mygrid', input=f"-settaxis,{time_str} -setmisstoc,1 -setrtomiss,1,10 -setmisstoc,0 -setrtomiss,-1,0.01 -chname,Band1,{product} -mergetime ../{dirname}/backup/{product}/*_tmp3.nc", options="-b F32 -f nc4 -r", output=f"../{dirname}/backup/{product}.nc")
         
-        remove = [f"rm ./{dirname}/backup/{product}/*_tmp?.nc"]
+        remove = [f"rm ../{dirname}/backup/{product}/*_tmp?.nc"]
         subprocess.run(remove, shell=True)
 
 
@@ -435,13 +435,11 @@ class goes():
 if __name__ == "__main__":
     
     st = time.time()
+    args = utils.parse_args()
     tout = 270                                                                # Set the timeout time for the processes (you may have to experiment with this based on your system)
-    try: os.remove("./warnings.txt")
+    try: shutil.rmtree("../info")
     except: pass
-    try: os.remove("./timings.txt")
-    except: pass
-    try: os.remove("./instances.txt")
-    except: pass
+    os.makedirs("../info", exist_ok=True)
     os.environ["REMAP_EXTRAPOLATE"] = "off"
     cdo = Cdo()
     s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
@@ -463,11 +461,11 @@ if __name__ == "__main__":
     yfirst   = {yfirst}
     yinc     = {yinc}
     """
-    with open("./perm/mygrid", "w") as file: file.write(grid_specs)
+    with open("./mygrid", "w") as file: file.write(grid_specs)
     
-    stdate_gb = datetime(2023, 8, 8)                                          # Start date (inclusive) for retrieving data
-    eddate_gb = datetime(2023, 8, 8)                                          # End date (inclusive) for retrieving data
-    step_gb = timedelta(days=1)                                               # Timestep
+    stdate_gb = datetime.strptime(args.start,"%Y%m%d")                        # --start 20230808
+    eddate_gb = datetime.strptime(args.end,"%Y%m%d")                          # --end 20230808
+    step_gb = timedelta(days=1)                                               # timestep (1 day)
     files_done = 0
     prev_time = datetime(2000, 1, 1, 0, 0)
     prev_dirname = "20000101_0000"
@@ -529,11 +527,11 @@ if __name__ == "__main__":
             mrge_file.start()
             mrge_mrms.join(tout)
             mrge_file.join(tout)
-            shutil.rmtree(f"./{dirName}/backup/") # Keep or remove backup netCDF files
+            if not args.backup: shutil.rmtree(f"../{dirName}/backup/") # only keeps backup if you say --backup
             let = time.time()
             lti = round(let-lst, 3)
             timing = f"{dirName} done in {lti} seconds\n"
-            with open("./timings.txt", "a") as file: file.write(timing)
+            with open("../info/timings.txt", "a") as file: file.write(timing)
             print("\n" + timing)
             prev_time = datetime_cr
             prev_dirname = dirName
