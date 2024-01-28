@@ -144,11 +144,10 @@ class utils():
         return flag
     
     @staticmethod
-    def check_data(dirname):
+    def process_data(dirname, remove):
         try:
             i = 0
-            prods = ["inputs", "target"]
-            for prod in prods:
+            for prod in ["inputs", "mrms"]:
                 ds = xr.open_zarr(f"./{dirname}/{prod}.zarr")
                 for variable in ds.variables:
                     for timestep in ds.time:
@@ -164,11 +163,32 @@ class utils():
             target_num = 0
             folder_path = f"./{dirname}/inputs.zarr"
             for root, dirs, files in os.walk(folder_path): inputs_num += len(files)
-            folder_path = f"./{dirname}/target.zarr"
+            folder_path = f"./{dirname}/mrms.zarr"
             for root, dirs, files in os.walk(folder_path): target_num += len(files)
             if (inputs_num != 2622 or target_num != 66):
+                i+=1
                 with open("./warnings.txt", "a") as file: file.write(f"{dirname} contains {inputs_num} inputs and {target_num} targets" + "\n")
-            print("\n" + f"Done checking {dirname}" + "\n")
+            if i==0:
+                ds = xr.open_zarr(f"./{dirname}/mrms.zarr")
+                newds = xr.Dataset()
+                tpar = []
+                for i in range(12):
+                    dwvi = ds["VIL_500mabovemeansealevel"].isel(time=i)
+                    upvi = ds["VIL_500mabovemeansealevel"].isel(time=i+13)                # Edit time threshold for VIL
+                    dwrf = ds["ReflectivityM10C_500mabovemeansealevel"].isel(time=i)
+                    uprf = ds["ReflectivityM10C_500mabovemeansealevel"].isel(time=i+13)   # Edit time threshold for -10 c ref
+                    tpvi = xr.where((upvi - dwvi) >= 10, 1, 0)                            # default 10 kg/m^2 over 30mins threshold for VIL
+                    tprf = xr.where((uprf - dwrf) >= 20, 1, 0)                            # default 20 dBz over 30mins threshold for -10 c ref
+                    targ = xr.where((tpvi == 1) & (tprf == 1), 1, 0)
+                    tpar.append(targ)
+                time_coords = ds["time"].isel(time=slice(13, 25))
+                newds["time"] = time_coords
+                newds["target"] = xr.concat(tpar, dim="time")
+                instances = newds["target"].sum().compute()
+                with open("./instances.txt", "a") as file: file.write(f"Instances of convective initiation in {dirname}: {instances.values}" + "\n")
+                newds.to_zarr(f"./{dirname}/target.zarr", mode='w', consolidated=True)
+                if remove: shutil.rmtree(f"./{dirname}/mrms.zarr/")
+                print("\n" + f"Done processing {dirname}" + "\n")
         except:
             with open("./warnings.txt", "a") as file: file.write(f"{dirname} contains no zarr" + "\n")
 
@@ -269,8 +289,8 @@ class mrms():
         try:
             ds1 = xr.open_dataset(f"./{dirname}/backup/vil.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
             ds2 = xr.open_dataset(f"./{dirname}/backup/rf-10.nc", chunks={'time': 1, 'lat': ygrd, 'lon': xgrd})
-            merged_ds = xr.merge([ds1, ds2])
-            merged_ds.to_zarr(f"./{dirname}/target.zarr", mode='w', consolidated=True)
+            ds = xr.merge([ds1, ds2])
+            ds.to_zarr(f"./{dirname}/mrms.zarr", mode='w', consolidated=True)
         except: pass
 
 
@@ -420,6 +440,8 @@ if __name__ == "__main__":
     except: pass
     try: os.remove("./timings.txt")
     except: pass
+    try: os.remove("./instances.txt")
+    except: pass
     os.environ["REMAP_EXTRAPOLATE"] = "off"
     cdo = Cdo()
     s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
@@ -443,7 +465,7 @@ if __name__ == "__main__":
     """
     with open("./perm/mygrid", "w") as file: file.write(grid_specs)
     
-    stdate_gb = datetime(2023, 8, 8)                                          # Start date (inclusive) for retrieving data
+     stdate_gb = datetime(2023, 8, 8)                                          # Start date (inclusive) for retrieving data
     eddate_gb = datetime(2023, 8, 8)                                          # End date (inclusive) for retrieving data
     step_gb = timedelta(days=1)                                               # Timestep
     files_done = 0
@@ -474,11 +496,11 @@ if __name__ == "__main__":
             dirName = datetime_cr.strftime("%Y%m%d_%H%M")
             utils.create_dir(dirName)
             
-            check = multiprocessing.Process(target=utils.check_data, args=(prev_dirname, ))
+            check = multiprocessing.Process(target=utils.process_data, args=(prev_dirname, True, ))
             tfm_mvil = multiprocessing.Process(target=mrms.mrms, args=(dirName, "VIL_00.50", "vil", datetime_cr, delaytimes, ))
             tfm_rf10 = multiprocessing.Process(target=mrms.mrms, args=(dirName, "Reflectivity_-10C_00.50", "rf-10", datetime_cr, delaytimes, ))
             tfm_rtma = multiprocessing.Process(target=rtma.rtma, args=(dirName, datetime_cr, delaytimes, ))
-            tfm_hrrr = multiprocessing.Process(target=hrrr.hrrr, args=(dirName, datetime_cr, 16, delaytimes, ))
+            tfm_hrrr = multiprocessing.Process(target=hrrr.hrrr, args=(dirName, datetime_cr, 1, delaytimes, ))
             tfm_bd02 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd02", 2, datetime_cr, delaytimes, ))
             tfm_bd11 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd11", 11, datetime_cr, delaytimes, ))
             tfm_elev = multiprocessing.Process(target=utils.elev_time, args=(dirName, datetime_cr, ))
@@ -507,9 +529,9 @@ if __name__ == "__main__":
             mrge_file.start()
             mrge_mrms.join(tout)
             mrge_file.join(tout)
-            shutil.rmtree(f"./{dirName}/backup/") # keep or remove backup (backup provides processed netcdf files and original files from AWS, keep in mind that this around triples the storage needed)
+            shutil.rmtree(f"./{dirName}/backup/") # Keep or remove backup netCDF files
             let = time.time()
-            lti = let - lst
+            lti = round(let-lst, 3)
             timing = f"{dirName} done in {lti} seconds\n"
             with open("./timings.txt", "a") as file: file.write(timing)
             print("\n" + timing)
@@ -519,7 +541,7 @@ if __name__ == "__main__":
             
         else: print("\n" + datetime_cr.strftime("%Y-%m-%d %H:%M") + " does not exist\n")
     
-    if files_done > 0: utils.check_data(prev_dirname)
+    if files_done > 0: utils.process_data(prev_dirname, True)
     et = time.time()
     ti = et - st
     print("\n" + f"Completed {files_done} files in ", ti, "seconds\n")
