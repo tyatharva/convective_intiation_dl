@@ -465,7 +465,7 @@ if __name__ == "__main__":
     """
     with open("./perm/mygrid", "w") as file: file.write(grid_specs)
     
-     stdate_gb = datetime(2023, 8, 8)                                          # Start date (inclusive) for retrieving data
+    stdate_gb = datetime(2023, 8, 8)                                          # Start date (inclusive) for retrieving data
     eddate_gb = datetime(2023, 8, 8)                                          # End date (inclusive) for retrieving data
     step_gb = timedelta(days=1)                                               # Timestep
     files_done = 0
