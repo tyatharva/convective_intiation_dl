@@ -29,6 +29,7 @@ def main():
     args = parse_args()
     allitems = os.listdir("../")
     dirs = [item for item in allitems if os.path.isdir(os.path.join("../", item)) and item.startswith("20")]
+    dirs = sorted(dirs)
     for dirname in dirs:
         try:
             ds = xr.open_zarr(f"../{dirname}/mrms.zarr")
