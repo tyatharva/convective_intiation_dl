@@ -21,14 +21,15 @@ Created on Sat Dec  9 15:14:33 2023
 # python data.py --start {start date as %Y%m%d} --end {end date as %Y%m%d}
 # add --backup to the end if you want to keep backup netCDF files
 # Example: python data.py --start 20230808 --end 20230808 --backup
-# This gets data for only 8/8/23 at a random time keeping backup
-# You will have to mess around with the code if you want more options
+# This gets data for only 8/8/23 at a 4 separate random time and grid keeping backup
+# You will have to mess around with the code if you want more options (such as 1 random time or a specific grid)
 
 import os
 import time
 import glob
 import gzip
 import boto3
+import random
 import shutil
 import fnmatch
 import argparse
@@ -445,24 +446,12 @@ if __name__ == "__main__":
     s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
     # mrms, hrrr, rtma, goes
     delaytimes = [3, 55, 20, 5]                                               # Delaytimes for retriving data (meant to simulate realtime)
-    gridtype = "lonlat"                                                       # Grid format (reccomended lat lon)
-    xsize = 4500                                                              # Points in x direction
-    ysize = 2500                                                              # Points in y direction
-    xfirst = -116.1                                                           # Starting (westernmost) longitude
-    xinc = 0.01                                                               # x increment
-    yfirst = 25                                                               # Starting (southernmost) latitude
-    yinc = 0.01                                                               # y increment
-    # The default domain is the largest possible without having NaN values
-    grid_specs = f"""gridtype = {gridtype}
-    xsize    = {xsize}
-    ysize    = {ysize}
-    xfirst   = {xfirst}
-    xinc     = {xinc}
-    yfirst   = {yfirst}
-    yinc     = {yinc}
-    """
-    with open("./mygrid", "w") as file: file.write(grid_specs)
-    
+    gridtype = "lonlat"                                                       # Don't change this
+    xsize = 1000                                                              # Points in x direction (you will have to fix the random grid generation and other things if you change this from default)
+    ysize = 500                                                               # Points in y direction (you will have to fix the random grid generation and other things if you change this from default)
+    xinc = 0.01                                                               # x increment (it is reccomended to keep this as default)
+    yinc = 0.01                                                               # y increment (it is reccomended to keep this as default)
+    # Largest possible domain that you can select smaller grids from: 4500(x)*2500(y) x starting at 116.1 y starting at 25
     stdate_gb = datetime.strptime(args.start,"%Y%m%d")                        # --start 20230808
     eddate_gb = datetime.strptime(args.end,"%Y%m%d")                          # --end 20230808
     step_gb = timedelta(days=1)                                               # timestep (1 day)
@@ -471,73 +460,85 @@ if __name__ == "__main__":
     prev_dirname = "20000101_0000"
     
     for i in range((eddate_gb - stdate_gb).days +1):
-        
         date_cr = stdate_gb + i * step_gb
-        hour_cr = np.random.randint(0, 24)
-        minute_cr = np.random.randint(0, 12) * 5
-        datetime_cr = date_cr + timedelta(hours=hour_cr, minutes=minute_cr)
-        if files_done > 0:
-            duration = datetime_cr - prev_time
-            duration_s = duration.total_seconds()
-            mins_diff = divmod(duration_s, 60)[0]
-            while mins_diff < 125:
-                hour_cr = np.random.randint(0, 24)
-                minute_cr = np.random.randint(0, 12) * 5
-                datetime_cr = date_cr + timedelta(hours=hour_cr, minutes=minute_cr)
+        for s in range(4):
+            xfirst = round(random.uniform(-116.1, -81.1), 2)                  # This is random, if you want specific change it
+            yfirst = round(random.uniform(25, 45), 2)                         # Same as above
+            grid_specs = f"""gridtype = {gridtype}
+            xsize    = {xsize}
+            ysize    = {ysize}
+            xfirst   = {xfirst}
+            xinc     = {xinc}
+            yfirst   = {yfirst}
+            yinc     = {yinc}
+            """
+            with open("./mygrid", "w") as file: file.write(grid_specs)
+            hour_cr = np.random.randint(s*6, (s*6)+6)                         # This is random, change it if you want a specfic time and change the for loop to for s in range(1)
+            minute_cr = np.random.randint(0, 12) * 5                          # Same as above
+            datetime_cr = date_cr + timedelta(hours=hour_cr, minutes=minute_cr)
+            if files_done > 0:
                 duration = datetime_cr - prev_time
                 duration_s = duration.total_seconds()
                 mins_diff = divmod(duration_s, 60)[0]
-        
-        if utils.locate_data(datetime_cr, "VIL_00.50", "Reflectivity_-10C_00.50", delaytimes) == 1:
-            lst = time.time()
-            print("\n" + datetime_cr.strftime("%Y-%m-%d %H:%M") + " has been found\n")
-            dirName = datetime_cr.strftime("%Y%m%d_%H%M")
-            utils.create_dir(dirName)
+                while mins_diff < 125:
+                    hour_cr = np.random.randint(0, 24)
+                    minute_cr = np.random.randint(0, 12) * 5
+                    datetime_cr = date_cr + timedelta(hours=hour_cr, minutes=minute_cr)
+                    duration = datetime_cr - prev_time
+                    duration_s = duration.total_seconds()
+                    mins_diff = divmod(duration_s, 60)[0]
             
-            check = multiprocessing.Process(target=utils.process_data, args=(prev_dirname, True, ))
-            tfm_mvil = multiprocessing.Process(target=mrms.mrms, args=(dirName, "VIL_00.50", "vil", datetime_cr, delaytimes, ))
-            tfm_rf10 = multiprocessing.Process(target=mrms.mrms, args=(dirName, "Reflectivity_-10C_00.50", "rf-10", datetime_cr, delaytimes, ))
-            tfm_rtma = multiprocessing.Process(target=rtma.rtma, args=(dirName, datetime_cr, delaytimes, ))
-            tfm_hrrr = multiprocessing.Process(target=hrrr.hrrr, args=(dirName, datetime_cr, 1, delaytimes, ))
-            tfm_bd02 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd02", 2, datetime_cr, delaytimes, ))
-            tfm_bd11 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd11", 11, datetime_cr, delaytimes, ))
-            tfm_elev = multiprocessing.Process(target=utils.elev_time, args=(dirName, datetime_cr, ))
-            mrge_mrms = multiprocessing.Process(target=mrms.merge_mrms, args=(dirName, ysize, xsize, ))
-            mrge_file = multiprocessing.Process(target=utils.merge_ins, args=(dirName, ysize, xsize, ))
-            
-            tfm_hrrr.start()
-            tfm_bd02.start()
-            tfm_bd11.start()
-            tfm_rtma.start()
-            tfm_rf10.start()
-            tfm_mvil.start()
-            tfm_elev.start()
-            if files_done > 0: check.start()
-            
-            if files_done > 0: check.join(tout)
-            tfm_elev.join(tout)
-            tfm_mvil.join(tout)
-            tfm_rf10.join(tout)
-            tfm_rtma.join(tout)
-            tfm_bd11.join(tout)
-            tfm_bd02.join(tout)
-            tfm_hrrr.join(tout)
-            
-            mrge_mrms.start()
-            mrge_file.start()
-            mrge_mrms.join(tout)
-            mrge_file.join(tout)
-            if not args.backup: shutil.rmtree(f"../{dirName}/backup/") # only keeps backup if you say --backup
-            let = time.time()
-            lti = round(let-lst, 3)
-            timing = f"{dirName} done in {lti} seconds\n"
-            with open("../info/timings.txt", "a") as file: file.write(timing)
-            print("\n" + timing)
-            prev_time = datetime_cr
-            prev_dirname = dirName
-            files_done += 1
-            
-        else: print("\n" + datetime_cr.strftime("%Y-%m-%d %H:%M") + " does not exist\n")
+            if utils.locate_data(datetime_cr, "VIL_00.50", "Reflectivity_-10C_00.50", delaytimes) == 1:
+                lst = time.time()
+                print("\n" + datetime_cr.strftime("%Y-%m-%d %H:%M") + " has been found\n")
+                dirName = datetime_cr.strftime("%Y%m%d_%H%M")
+                utils.create_dir(dirName)
+                
+                check = multiprocessing.Process(target=utils.process_data, args=(prev_dirname, True, ))
+                tfm_mvil = multiprocessing.Process(target=mrms.mrms, args=(dirName, "VIL_00.50", "vil", datetime_cr, delaytimes, ))
+                tfm_rf10 = multiprocessing.Process(target=mrms.mrms, args=(dirName, "Reflectivity_-10C_00.50", "rf-10", datetime_cr, delaytimes, ))
+                tfm_rtma = multiprocessing.Process(target=rtma.rtma, args=(dirName, datetime_cr, delaytimes, ))
+                tfm_hrrr = multiprocessing.Process(target=hrrr.hrrr, args=(dirName, datetime_cr, 1, delaytimes, ))
+                tfm_bd02 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd02", 2, datetime_cr, delaytimes, ))
+                tfm_bd11 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd11", 11, datetime_cr, delaytimes, ))
+                tfm_elev = multiprocessing.Process(target=utils.elev_time, args=(dirName, datetime_cr, ))
+                mrge_mrms = multiprocessing.Process(target=mrms.merge_mrms, args=(dirName, ysize, xsize, ))
+                mrge_file = multiprocessing.Process(target=utils.merge_ins, args=(dirName, ysize, xsize, ))
+                
+                tfm_hrrr.start()
+                tfm_bd02.start()
+                tfm_bd11.start()
+                tfm_rtma.start()
+                tfm_rf10.start()
+                tfm_mvil.start()
+                tfm_elev.start()
+                if files_done > 0: check.start()
+                
+                if files_done > 0: check.join(tout)
+                tfm_elev.join(tout)
+                tfm_mvil.join(tout)
+                tfm_rf10.join(tout)
+                tfm_rtma.join(tout)
+                tfm_bd11.join(tout)
+                tfm_bd02.join(tout)
+                tfm_hrrr.join(tout)
+                
+                mrge_mrms.start()
+                mrge_file.start()
+                mrge_mrms.join(tout)
+                mrge_file.join(tout)
+                if not args.backup: shutil.rmtree(f"../{dirName}/backup/") # only keeps backup if you say --backup
+                let = time.time()
+                lti = round(let-lst, 3)
+                timing = f"{dirName} done in {lti} seconds\n"
+                with open("../info/timings.txt", "a") as file: file.write(timing)
+                print("\n" + timing)
+                shutil.copy("./mygrid", f"../{dirName}/grid.txt")
+                prev_time = datetime_cr
+                prev_dirname = dirName
+                files_done += 1
+                
+            else: print("\n" + datetime_cr.strftime("%Y-%m-%d %H:%M") + " does not exist\n")
     
     if files_done > 0: utils.process_data(prev_dirname, True)
     et = time.time()
