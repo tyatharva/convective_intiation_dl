@@ -165,6 +165,7 @@ class utils():
     
     @staticmethod
     def process_data(dirname, remove):
+        ins = 2622 # change to 1182 if using only mandatory levels, 2622 if all levels
         try:
             i = 0
             for prod in ["inputs", "mrms"]:
@@ -185,9 +186,9 @@ class utils():
             for root, dirs, files in os.walk(folder_path): inputs_num += len(files)
             folder_path = f"../{dirname}/mrms.zarr"
             for root, dirs, files in os.walk(folder_path): target_num += len(files)
-            if (inputs_num != 2622 or target_num != 66):
+            if (inputs_num != ins or target_num != 66):
                 i+=1
-                with open("../info/warnings.txt", "a") as file: file.write(f"{dirname} contains {inputs_num} inputs and {target_num} targets" + "\n")
+                with open("../info/warnings.txt", "a") as file: file.write(f"{dirname} contains {inputs_num} inputs and {target_num} mrms" + "\n")
             print("\n" + f"Done processing {dirname}" + "\n")
         except:
             with open("../info/warnings.txt", "a") as file: file.write(f"{dirname} contains no zarr" + "\n")
@@ -320,7 +321,11 @@ class hrrr():
         fxx=range(0,1)
         data = FastHerbie(DATES, model="hrrr", product="prs", fxx=fxx, max_threads=thds,)
         #                       Soil temp and moisture at 0m       Standard vars at 500-1000mb every 25mb and 1013.2mb                                               Wind at 10 and 80m                                                        Equilibrium level           Lowest condensation level           Level of free convection (shows up as no_level sometimes)
+        # Data for vertical levels 500-100 step of 25 mb and 1013.2 mb (all levels, file size around 1.6gb, total variables around 174)
         data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(([5-9][0,2,5,7][0,5])|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(VGTYP)", max_threads=thds, save_dir = f"../{dirname}/backup/")
+        # Data for vertical levels 500, 700, 850, 925, 1000, 1013.2mb (mandatory levels, file size around 500mb, 78 total variables)
+        # data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(500|700|850|925|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(VGTYP)", max_threads=thds, save_dir = f"../{dirname}/backup/")
+        # Make sure the ins variable in utils.process_data matches the data you are getting
         hrrr.mfilerdir_hrrr(f"../{dirname}/backup/hrrr/")
         
         tonc = [
@@ -481,7 +486,7 @@ if __name__ == "__main__":
                 duration_s = duration.total_seconds()
                 mins_diff = divmod(duration_s, 60)[0]
                 while mins_diff < 125:
-                    hour_cr = np.random.randint(0, 24)
+                    hour_cr = np.random.randint(s*6, (s*6)+6)
                     minute_cr = np.random.randint(0, 12) * 5
                     datetime_cr = date_cr + timedelta(hours=hour_cr, minutes=minute_cr)
                     duration = datetime_cr - prev_time
