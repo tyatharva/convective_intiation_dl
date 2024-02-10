@@ -452,7 +452,7 @@ if __name__ == "__main__":
     # mrms, hrrr, rtma, goes
     delaytimes = [3, 55, 20, 5]                                               # Delaytimes for retriving data (meant to simulate realtime)
     gridtype = "lonlat"                                                       # Don't change this
-    xsize = 1000                                                              # Points in x direction (you will have to fix the random grid generation and other things if you change this from default)
+    xsize = 500                                                               # Points in x direction (you will have to fix the random grid generation and other things if you change this from default)
     ysize = 500                                                               # Points in y direction (you will have to fix the random grid generation and other things if you change this from default)
     xinc = 0.01                                                               # x increment (it is reccomended to keep this as default)
     yinc = 0.01                                                               # y increment (it is reccomended to keep this as default)
@@ -467,7 +467,7 @@ if __name__ == "__main__":
     for i in range((eddate_gb - stdate_gb).days +1):
         date_cr = stdate_gb + i * step_gb
         for s in range(4):
-            xfirst = round(random.uniform(-116.1, -81.1), 2)                  # This is random, if you want specific change it
+            xfirst = round(random.uniform(-116.1, -76.1), 2)                  # This is random, if you want specific change it
             yfirst = round(random.uniform(25, 45), 2)                         # Same as above
             grid_specs = f"""gridtype = {gridtype}
             xsize    = {xsize}
