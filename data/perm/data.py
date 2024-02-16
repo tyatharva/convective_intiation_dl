@@ -322,9 +322,9 @@ class hrrr():
         data = FastHerbie(DATES, model="hrrr", product="prs", fxx=fxx, max_threads=thds,)
         #                       Soil temp and moisture at 0m       Standard vars at 500-1000mb every 25mb and 1013.2mb                                               Wind at 10 and 80m                                                        Equilibrium level           Lowest condensation level           Level of free convection (shows up as no_level before 2022)
         # Data for vertical levels 500-100 step of 25 mb and 1013.2 mb (all levels, file size around 1.6gb, total variables around 174)
-        data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(([5-9][0,2,5,7][0,5])|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(SFCR)", max_threads=thds, save_dir = f"../{dirname}/backup/")
+        data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(([5-9][0,2,5,7][0,5])|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((reserved)|(no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(SFCR)", max_threads=thds, save_dir = f"../{dirname}/backup/")
         # Data for vertical levels 500, 700, 850, 925, 1000, 1013.2mb (mandatory levels, file size around 500mb, 78 total variables)
-        # data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(500|700|850|925|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(SFCR)", max_threads=thds, save_dir = f"../{dirname}/backup/")
+        # data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(500|700|850|925|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((reserved)|(no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(SFCR)", max_threads=thds, save_dir = f"../{dirname}/backup/")
         # Make sure the ins variable in utils.process_data matches the data you are getting
         hrrr.mfilerdir_hrrr(f"../{dirname}/backup/hrrr/")
         
@@ -342,7 +342,13 @@ class hrrr():
         h2 = hrtime.strftime("%H")
         f1 = glob.glob(f"../{dirname}/backup/hrrr/*t{h1}z*.nc")[0]
         f2 = glob.glob(f"../{dirname}/backup/hrrr/*t{h2}z*.nc")[0]
-        cdo.remapnn("./mygrid", input=f"-settaxis,{stime} -inttime,{ltime} -mergetime {f1} {f2}", options=f"-b F32 -P {thds} -f nc4 -r", output=f"../{dirname}/backup/hrrr.nc")
+        while True:
+            try:
+                cdo.remapnn("./mygrid", input=f"-chname,HGT_no_level,HGT_leveloffreeconvection -chname,HGT_reserved,HGT_leveloffreeconvection -settaxis,{stime} -inttime,{ltime} -mergetime {f1} {f2}", options=f"-b F32 -P {thds} -f nc4 -r", output=f"../{dirname}/backup/hrrr.nc")
+                break
+            except Exception as e:
+                print("\n\n" + f"HRRR exception: {e}" + "\n\n")
+                time.sleep(1)
         
         remove = [f"rm ../{dirname}/backup/hrrr/*.nc"]
         subprocess.run(remove, shell=True)
