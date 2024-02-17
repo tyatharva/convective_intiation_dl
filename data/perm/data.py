@@ -449,6 +449,7 @@ if __name__ == "__main__":
     st = time.time()
     args = utils.parse_args()
     tout = 270                                                                # Set the timeout time for the processes (you may have to experiment with this based on your system)
+    total_att = 5
     try: shutil.rmtree("../info")
     except: pass
     os.makedirs("../info", exist_ok=True)
@@ -503,8 +504,6 @@ if __name__ == "__main__":
                 lst = time.time()
                 print("\n" + datetime_cr.strftime("%Y-%m-%d %H:%M") + " has been found\n")
                 dirName = datetime_cr.strftime("%Y%m%d_%H%M")
-                utils.create_dir(dirName)
-                
                 check = multiprocessing.Process(target=utils.process_data, args=(prev_dirname, True, ))
                 tfm_mvil = multiprocessing.Process(target=mrms.mrms, args=(dirName, "VIL_00.50", "vil", datetime_cr, delaytimes, ))
                 tfm_rf10 = multiprocessing.Process(target=mrms.mrms, args=(dirName, "Reflectivity_-10C_00.50", "rf-10", datetime_cr, delaytimes, ))
@@ -516,29 +515,37 @@ if __name__ == "__main__":
                 mrge_mrms = multiprocessing.Process(target=mrms.merge_mrms, args=(dirName, ysize, xsize, ))
                 mrge_file = multiprocessing.Process(target=utils.merge_ins, args=(dirName, ysize, xsize, ))
                 
-                tfm_hrrr.start()
-                tfm_bd02.start()
-                tfm_bd11.start()
-                tfm_rtma.start()
-                tfm_rf10.start()
-                tfm_mvil.start()
-                tfm_elev.start()
-                if files_done > 0: check.start()
+                while (attempt := 1) <= total_att:
+                    try:
+                        utils.create_dir(dirName)
+                        tfm_hrrr.start()
+                        tfm_bd02.start()
+                        tfm_bd11.start()
+                        tfm_rtma.start()
+                        tfm_rf10.start()
+                        tfm_mvil.start()
+                        tfm_elev.start()
+                        if files_done > 0: check.start()
+                        if files_done > 0: check.join(tout)
+                        tfm_elev.join(tout)
+                        tfm_mvil.join(tout)
+                        tfm_rf10.join(tout)
+                        tfm_rtma.join(tout)
+                        tfm_bd11.join(tout)
+                        tfm_bd02.join(tout)
+                        tfm_hrrr.join(tout)
+                        mrge_mrms.start()
+                        mrge_file.start()
+                        mrge_mrms.join(tout)
+                        mrge_file.join(tout)
+                        break
+                    except Exception as e:
+                        print("\n\n" + f"Exception encountered: {e}" + f"\n...retrying...attempt #{attempt}...\n\n")
+                        shutil.rmtree(f"../{dirName}/")
+                        attempt += 1
+                        time.sleep(1)
                 
-                if files_done > 0: check.join(tout)
-                tfm_elev.join(tout)
-                tfm_mvil.join(tout)
-                tfm_rf10.join(tout)
-                tfm_rtma.join(tout)
-                tfm_bd11.join(tout)
-                tfm_bd02.join(tout)
-                tfm_hrrr.join(tout)
-                
-                mrge_mrms.start()
-                mrge_file.start()
-                mrge_mrms.join(tout)
-                mrge_file.join(tout)
-                if not args.backup: shutil.rmtree(f"../{dirName}/backup/") # only keeps backup if you say --backup
+                if not args.backup: shutil.rmtree(f"../{dirName}/backup/")
                 let = time.time()
                 lti = round(let-lst, 3)
                 timing = f"{dirName} done in {lti} seconds\n"
