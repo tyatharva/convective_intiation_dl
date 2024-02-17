@@ -18,10 +18,10 @@ Created on Sat Dec  9 15:14:33 2023
 # How to run:
 # Open in terminal
 # cd into directory
-# python data.py --start {start date as %Y%m%d} --end {end date as %Y%m%d}
+# python data.py [--backup] --start {start date as %Y%m%d} --end {end date as %Y%m%d} --files {number of files per day}
 # add --backup to the end if you want to keep backup netCDF files
-# Example: python data.py --start 20230808 --end 20230808 --backup
-# This gets data for only 8/8/23 at a 4 separate random time and grid keeping backup
+# Example: python data.py --start 20230808 --end 20230808 --files 8 --backup
+# This gets data for only 8/8/23 at 8 random times and grid keeping backup
 # You will have to mess around with the code if you want more options (such as 1 random time or a specific grid)
 
 import os
@@ -54,6 +54,7 @@ class utils():
         parser.add_argument('--backup', action='store_true')
         parser.add_argument('--start', required=True)
         parser.add_argument('--end', required=True)
+        parser.add_argument('--files', type=int, required=True)
         return parser.parse_args()
     
     @staticmethod
@@ -165,7 +166,7 @@ class utils():
     
     @staticmethod
     def process_data(dirname, remove):
-        ins = 2622 # change to 1182 if using only mandatory levels, 2622 if all levels
+        ins = 1182 # change to 1182 if using only mandatory levels, 2622 if all levels
         try:
             i = 0
             for prod in ["inputs", "mrms"]:
@@ -320,11 +321,11 @@ class hrrr():
         DATES = pd.date_range(start=hrtime.strftime("%Y-%m-%d %H:00"), periods=2, freq="1H",)
         fxx=range(0,1)
         data = FastHerbie(DATES, model="hrrr", product="prs", fxx=fxx, max_threads=thds,)
-        #                       Soil temp and moisture at 0m       Standard vars at 500-1000mb every 25mb and 1013.2mb                                               Wind at 10 and 80m                                                        Equilibrium level           Lowest condensation level           Level of free convection (shows up as no_level before 2022)
+        #                       Soil temp and moisture at 0m       Standard vars at 500-1000mb every 25mb and 1013.2mb                                               Wind at 10 and 80m                                                        Equilibrium level           Lowest condensation level           Level of free convection (many aliases)
         # Data for vertical levels 500-100 step of 25 mb and 1013.2 mb (all levels, file size around 1.6gb, total variables around 174)
-        data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(([5-9][0,2,5,7][0,5])|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((reserved)|(no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(SFCR)", max_threads=thds, save_dir = f"../{dirname}/backup/")
+        # data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(([5-9][0,2,5,7][0,5])|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((reserved)|(no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(SFCR)", max_threads=thds, save_dir = f"../{dirname}/backup/")
         # Data for vertical levels 500, 700, 850, 925, 1000, 1013.2mb (mandatory levels, file size around 500mb, 78 total variables)
-        # data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(500|700|850|925|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((reserved)|(no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(SFCR)", max_threads=thds, save_dir = f"../{dirname}/backup/")
+        data.download(searchString="(0-0 m below ground)|((TMP|DPT|VVEL|UGRD|VGRD|ABSV):(500|700|850|925|(10[0,1][0,3])))|(CAPE)|(CIN)|(FRICV)|(MSLMA)|(RELV)|([U\|V]GRD:[1,8]0 m)|(SNOWC)|(ICEC)|(LAND)|((TMP|DPT):2 m)|(PWAT)|(HPBL)|(HGT:equilibrium level)|(HGT:level of adiabatic condensation from sfc)|(HGT:((reserved)|(no_level)|(level of free convection)))|(HGT:0C isotherm)|(LFTX)|(SFCR)", max_threads=thds, save_dir = f"../{dirname}/backup/")
         # Make sure the ins variable in utils.process_data matches the data you are getting
         hrrr.mfilerdir_hrrr(f"../{dirname}/backup/hrrr/")
         
@@ -342,13 +343,7 @@ class hrrr():
         h2 = hrtime.strftime("%H")
         f1 = glob.glob(f"../{dirname}/backup/hrrr/*t{h1}z*.nc")[0]
         f2 = glob.glob(f"../{dirname}/backup/hrrr/*t{h2}z*.nc")[0]
-        while True:
-            try:
-                cdo.remapnn("./mygrid", input=f"-chname,HGT_no_level,HGT_leveloffreeconvection -chname,HGT_reserved,HGT_leveloffreeconvection -settaxis,{stime} -inttime,{ltime} -mergetime {f1} {f2}", options=f"-b F32 -P {thds} -f nc4 -r", output=f"../{dirname}/backup/hrrr.nc")
-                break
-            except Exception as e:
-                print("\n\n" + f"HRRR exception: {e}" + "\n\n")
-                time.sleep(1)
+        cdo.remapnn("./mygrid", input=f"-chname,HGT_no_level,HGT_leveloffreeconvection -chname,HGT_reserved,HGT_leveloffreeconvection -settaxis,{stime} -inttime,{ltime} -mergetime {f1} {f2}", options=f"-b F32 -P {thds} -f nc4 -r", output=f"../{dirname}/backup/hrrr.nc")
         
         remove = [f"rm ../{dirname}/backup/hrrr/*.nc"]
         subprocess.run(remove, shell=True)
@@ -448,8 +443,8 @@ if __name__ == "__main__":
     
     st = time.time()
     args = utils.parse_args()
-    tout = 270                                                                # Set the timeout time for the processes (you may have to experiment with this based on your system)
-    total_att = 5
+    tout = 500                                                                # Set the timeout time for the processes (you may have to experiment with this based on your system)
+    total_att = 5                                                             # Set the maximum number of reattempts if something goes wrong
     try: shutil.rmtree("../info")
     except: pass
     os.makedirs("../info", exist_ok=True)
@@ -464,6 +459,7 @@ if __name__ == "__main__":
     xinc = 0.01                                                               # x increment (it is reccomended to keep this as default)
     yinc = 0.01                                                               # y increment (it is reccomended to keep this as default)
     # Largest possible domain that you can select smaller grids from: 4500(x)*2500(y) x starting at 116.1 y starting at 25
+    fpd = args.files                                                          # --files 8 (maximum while preserving randomness is 8)
     stdate_gb = datetime.strptime(args.start,"%Y%m%d")                        # --start 20230808
     eddate_gb = datetime.strptime(args.end,"%Y%m%d")                          # --end 20230808
     step_gb = timedelta(days=1)                                               # timestep (1 day)
@@ -473,7 +469,7 @@ if __name__ == "__main__":
     
     for i in range((eddate_gb - stdate_gb).days +1):
         date_cr = stdate_gb + i * step_gb
-        for s in range(4):
+        for s in range(fpd):
             xfirst = round(random.uniform(-116.1, -76.1), 2)                  # This is random, if you want specific change it
             yfirst = round(random.uniform(25, 45), 2)                         # Same as above
             grid_specs = f"""gridtype = {gridtype}
@@ -485,15 +481,15 @@ if __name__ == "__main__":
             yinc     = {yinc}
             """
             with open("./mygrid", "w") as file: file.write(grid_specs)
-            hour_cr = np.random.randint(s*6, (s*6)+6)                         # This is random, change it if you want a specfic time and change the for loop to for s in range(1)
-            minute_cr = np.random.randint(0, 12) * 5                          # Same as above
+            hour_cr = np.random.randint(s*(24/fpd), (s*(24/fpd))+(24/fpd))
+            minute_cr = np.random.randint(0, 12) * 5
             datetime_cr = date_cr + timedelta(hours=hour_cr, minutes=minute_cr)
             if files_done > 0:
                 duration = datetime_cr - prev_time
                 duration_s = duration.total_seconds()
                 mins_diff = divmod(duration_s, 60)[0]
                 while mins_diff < 125:
-                    hour_cr = np.random.randint(s*6, (s*6)+6)
+                    hour_cr = np.random.randint(s*(24/fpd), (s*(24/fpd))+(24/fpd))
                     minute_cr = np.random.randint(0, 12) * 5
                     datetime_cr = date_cr + timedelta(hours=hour_cr, minutes=minute_cr)
                     duration = datetime_cr - prev_time
@@ -505,47 +501,49 @@ if __name__ == "__main__":
                 print("\n" + datetime_cr.strftime("%Y-%m-%d %H:%M") + " has been found\n")
                 dirName = datetime_cr.strftime("%Y%m%d_%H%M")
                 check = multiprocessing.Process(target=utils.process_data, args=(prev_dirname, True, ))
-                tfm_mvil = multiprocessing.Process(target=mrms.mrms, args=(dirName, "VIL_00.50", "vil", datetime_cr, delaytimes, ))
-                tfm_rf10 = multiprocessing.Process(target=mrms.mrms, args=(dirName, "Reflectivity_-10C_00.50", "rf-10", datetime_cr, delaytimes, ))
-                tfm_rtma = multiprocessing.Process(target=rtma.rtma, args=(dirName, datetime_cr, delaytimes, ))
-                tfm_hrrr = multiprocessing.Process(target=hrrr.hrrr, args=(dirName, datetime_cr, 1, delaytimes, ))
-                tfm_bd02 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd02", 2, datetime_cr, delaytimes, ))
-                tfm_bd11 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd11", 11, datetime_cr, delaytimes, ))
-                tfm_elev = multiprocessing.Process(target=utils.elev_time, args=(dirName, datetime_cr, ))
-                mrge_mrms = multiprocessing.Process(target=mrms.merge_mrms, args=(dirName, ysize, xsize, ))
-                mrge_file = multiprocessing.Process(target=utils.merge_ins, args=(dirName, ysize, xsize, ))
-                
-                while (attempt := 1) <= total_att:
-                    try:
-                        utils.create_dir(dirName)
-                        tfm_hrrr.start()
-                        tfm_bd02.start()
-                        tfm_bd11.start()
-                        tfm_rtma.start()
-                        tfm_rf10.start()
-                        tfm_mvil.start()
-                        tfm_elev.start()
-                        if files_done > 0: check.start()
-                        if files_done > 0: check.join(tout)
-                        tfm_elev.join(tout)
-                        tfm_mvil.join(tout)
-                        tfm_rf10.join(tout)
-                        tfm_rtma.join(tout)
-                        tfm_bd11.join(tout)
-                        tfm_bd02.join(tout)
-                        tfm_hrrr.join(tout)
-                        mrge_mrms.start()
-                        mrge_file.start()
-                        mrge_mrms.join(tout)
-                        mrge_file.join(tout)
-                        break
-                    except Exception as e:
-                        print("\n\n" + f"Exception encountered: {e}" + f"\n...retrying...attempt #{attempt}...\n\n")
-                        shutil.rmtree(f"../{dirName}/")
+                if files_done > 0: check.start()
+                attempt = 1
+                while attempt <= total_att:
+                    utils.create_dir(dirName)
+                    tfm_mvil = multiprocessing.Process(target=mrms.mrms, args=(dirName, "VIL_00.50", "vil", datetime_cr, delaytimes, ))
+                    tfm_rf10 = multiprocessing.Process(target=mrms.mrms, args=(dirName, "Reflectivity_-10C_00.50", "rf-10", datetime_cr, delaytimes, ))
+                    tfm_rtma = multiprocessing.Process(target=rtma.rtma, args=(dirName, datetime_cr, delaytimes, ))
+                    tfm_hrrr = multiprocessing.Process(target=hrrr.hrrr, args=(dirName, datetime_cr, 1, delaytimes, ))
+                    tfm_bd02 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd02", 2, datetime_cr, delaytimes, ))
+                    tfm_bd11 = multiprocessing.Process(target=goes.goes, args=(dirName, "bd11", 11, datetime_cr, delaytimes, ))
+                    tfm_elev = multiprocessing.Process(target=utils.elev_time, args=(dirName, datetime_cr, ))
+                    mrge_mrms = multiprocessing.Process(target=mrms.merge_mrms, args=(dirName, ysize, xsize, ))
+                    mrge_file = multiprocessing.Process(target=utils.merge_ins, args=(dirName, ysize, xsize, ))
+                    tfm_hrrr.start()
+                    tfm_bd02.start()
+                    tfm_bd11.start()
+                    tfm_rtma.start()
+                    tfm_rf10.start()
+                    tfm_mvil.start()
+                    tfm_elev.start()
+                    tfm_elev.join(tout)
+                    tfm_mvil.join(tout)
+                    tfm_rf10.join(tout)
+                    tfm_rtma.join(tout)
+                    tfm_bd11.join(tout)
+                    tfm_bd02.join(tout)
+                    tfm_hrrr.join(tout)
+                    mrge_mrms.start()
+                    mrge_file.start()
+                    mrge_mrms.join(tout)
+                    mrge_file.join(tout)
+                    if not (os.path.exists(f"../{dirName}/inputs.zarr/") and os.path.exists(f"../{dirName}/mrms.zarr/")):
+                        if attempt != total_att:
+                            shutil.rmtree(f"../{dirName}/")
+                            err = f"{dirName} retry #{attempt} (attempt #{attempt+1})"
+                            print("\n\n" + err + "\n\n")
+                            with open("../info/retries.txt", "a") as file: file.write(err + "\n")
                         attempt += 1
                         time.sleep(1)
+                    else: attempt = total_att + 1
                 
-                if not args.backup: shutil.rmtree(f"../{dirName}/backup/")
+                if files_done > 0: check.join(tout)
+                if not args.backup: shutil.rmtree(f"../{dirName}/backup/") # if you want to keep backup netCDF files, --backup
                 let = time.time()
                 lti = round(let-lst, 3)
                 timing = f"{dirName} done in {lti} seconds\n"
@@ -561,4 +559,4 @@ if __name__ == "__main__":
     if files_done > 0: utils.process_data(prev_dirname, True)
     et = time.time()
     ti = et - st
-    print("\n" + f"Completed {files_done} files in ", ti, "seconds\n")
+    print("\n" + f"Completed {files_done} files from {args.start} to {args.end} with {args.files} files per day in ", ti, "seconds\n")
