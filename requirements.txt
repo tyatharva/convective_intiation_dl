@@ -5,9 +5,10 @@ boto3 (conda install boto3)
 Herbie (https://github.com/blaylockbk/Herbie)
 python-cdo (conda install -c conda-forge python-cdo)
 cartopy (for plotting in plot.py)
+zarr python (pip install zarr, but I'm not actually sure if you need this as it is used within xarray)
 
 Required command line pacakges:
 netcdf-4 (what I like to do is install this by installing netcdf-fortran, which is sudo apt install libnetcdff-dev)
 cdo (sudo apt install cdo)
-gdal (sudo apt install libgdal-dev)
-wgrib2 (you should find instructions at https://www.cpc.ncep.noaa.gov/products/wesley/wgrib2/, when you install it, you need to give it netcdf-4 capabilities, give it the path to your netcdf lib and bin, but let it install its own hdf5)
+gdal (sudo apt install libgdal-dev and sudo apt install gdal-bin)
+wgrib2 (you should find instructions at https://www.cpc.ncep.noaa.gov/products/wesley/wgrib2/, when you install it, you need to give it netCDF4 capabilities, give it the path to your netcdf lib and bin, but let it install its own hdf5)
