@@ -19,7 +19,7 @@ def extract_datetime(input_string):
     tim = datetime.strptime(numbers_only[:12], "%Y%m%d%H%M")
     return tim.strftime("%Y-%m-%d %H:%M")
 
-class MyDataset(Dataset):
+class ConvInitData(Dataset):
     def __init__(self, data_dir):
         self.data_dir = data_dir
         self.sample_paths = self._get_sample_paths()
@@ -51,7 +51,7 @@ class MyDataset(Dataset):
 
 path_to_data = "../data"
 batches_to_display = 1
-dataset = MyDataset(path_to_data)
+dataset = ConvInitData(path_to_data)
 dataloader = DataLoader(dataset, batch_size=12, shuffle=True)
 for batch_idx, (input_batch, target_batch) in enumerate(dataloader):
     print(f"Batch {batch_idx + 1}:")
