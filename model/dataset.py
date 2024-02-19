@@ -3,7 +3,7 @@
 """
 Created on Sat Feb 10 21:57:45 2024
 
-@author: atyagi
+@author: Atharva Tyagi
 """
 
 import re
