@@ -49,8 +49,9 @@ class MyDataset(Dataset):
         target_tensor = torch.stack([torch.from_numpy(target_store[var][:]) for var in target_variables])
         return input_tensor, target_tensor
 
-
-dataset = MyDataset("/home/atyagi/Weather/convective_initiation/tmpdat")
+path_to_data = "../data"
+batches_to_display = 1
+dataset = MyDataset(path_to_data)
 dataloader = DataLoader(dataset, batch_size=12, shuffle=True)
 for batch_idx, (input_batch, target_batch) in enumerate(dataloader):
     print(f"Batch {batch_idx + 1}:")
@@ -61,5 +62,5 @@ for batch_idx, (input_batch, target_batch) in enumerate(dataloader):
     plt.colorbar()
     plt.show()
     # input_batch, target_batch = input_batch.to("cuda"), target_batch.to("cuda")
-    if batch_idx == 0:
+    if batch_idx == (batches_to_display-1):
         break
