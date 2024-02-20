@@ -14,16 +14,19 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 
+# Gets the date and time of the data from the file name
 def extract_datetime(input_string):
     numbers_only = ''.join(re.findall(r'\d+', input_string))
     tim = datetime.strptime(numbers_only[:12], "%Y%m%d%H%M")
     return tim.strftime("%Y-%m-%d %H:%M")
 
+# Custom dataset
 class ConvInitData(Dataset):
     def __init__(self, data_dir):
         self.data_dir = data_dir
         self.sample_paths = self._get_sample_paths()
 
+    # Gets all the paths to the data
     def _get_sample_paths(self):
         sample_paths = []
         for root, dirs, files in os.walk(self.data_dir):
@@ -39,28 +42,45 @@ class ConvInitData(Dataset):
         return len(self.sample_paths)
 
     def __getitem__(self, index):
+        # Open the data
         input_path, target_path = self.sample_paths[index]
         input_store = zarr.open(input_path, mode='r')
         target_store = zarr.open(target_path, mode='r')
+        # Print date and time of data (need to remove this when everything works)
         print(extract_datetime(input_path))
+        # Ignore lat, lon, and time variables
         input_variables = sorted([var for var in input_store.array_keys() if var not in ['time', 'lat', 'lon']])
         target_variables = sorted([var for var in target_store.array_keys() if var not in ['time', 'lat', 'lon']])
+        # Combine variables and return tensors
+        # Eager (works)
         input_tensor = torch.stack([torch.from_numpy(input_store[var][:]) for var in input_variables])
         target_tensor = torch.stack([torch.from_numpy(target_store[var][:]) for var in target_variables])
+        # Lazy (have not tested yet)
+        # input_tensor = [torch.from_numpy(input_store[var][:]) for var in input_variables]
+        # target_tensor = [torch.from_numpy(target_store[var][:]) for var in target_variables]
         return input_tensor, target_tensor
 
+# Initialize the dataset and dataloader and determine the device
+if torch.cuda.is_available(): device = torch.device("cuda")
+else: device = torch.device("cpu")
 path_to_data = "../data"
-batches_to_display = 1
 dataset = ConvInitData(path_to_data)
-dataloader = DataLoader(dataset, batch_size=12, shuffle=True)
+dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
+
+# Test the dataloader/dataset
 for batch_idx, (input_batch, target_batch) in enumerate(dataloader):
+    # Print batch number
     print(f"Batch {batch_idx + 1}:")
+    # Print the shape of the batch
     print("Input Batch Shape:", input_batch.shape)
     print("Target Batch Shape:", target_batch.shape, "\n")
+    # Plot some data
     inslice = input_batch[0][71][1][:][:]
     plt.imshow(inslice.numpy(), cmap='viridis', origin='lower')
     plt.colorbar()
     plt.show()
-    # input_batch, target_batch = input_batch.to("cuda"), target_batch.to("cuda")
-    if batch_idx == (batches_to_display-1):
+    # Send the batch to the GPU (each piece of data takes up slightly more than 1GB of VRAM)
+    input_batch, target_batch = input_batch.to(device), target_batch.to(device)
+    # Break after a certain number of batches are tested
+    if batch_idx == 0:
         break
