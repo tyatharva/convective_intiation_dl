@@ -6,7 +6,7 @@ Created on Sat Dec  9 15:14:33 2023
 @author: Atharva Tyagi
 """
 
-# Requires UNIX, I reccomend a decent amount of free storage at at least 16gb of RAM
+# Requires UNIX, I reccomend a decent amount of free storage and at least 16gb of RAM
 # This gets data for the last hour for everything except for MRMS, which is the previous and next hour
 # You can use any MRMS variable you want but you will have to mess with the code if you are not using the defaults
 # For GOES, you may need to modify a few things to use different bands
