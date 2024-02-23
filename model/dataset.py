@@ -61,8 +61,7 @@ class ConvInitData(Dataset):
         return input_tensor, target_tensor
 
 # Initialize the dataset and dataloader and determine the device
-if torch.cuda.is_available(): device = torch.device("cuda")
-else: device = torch.device("cpu")
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 path_to_data = "../data"
 dataset = ConvInitData(path_to_data)
 dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
@@ -80,7 +79,7 @@ for batch_idx, (input_batch, target_batch) in enumerate(dataloader):
     plt.colorbar()
     plt.show()
     # Send the batch to the GPU (each piece of data takes up slightly more than 1GB of VRAM)
-    input_batch, target_batch = input_batch.to(device), target_batch.to(device)
+    input_batch, target_batch = input_batch.to(DEVICE), target_batch.to(DEVICE)
     # Break after a certain number of batches are tested
     if batch_idx == 0:
         break
