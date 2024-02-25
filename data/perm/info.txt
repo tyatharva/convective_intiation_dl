@@ -3,6 +3,10 @@ If you need a bigger domain, visit https://pae-paha.pacioos.hawaii.edu/erddap/gr
 
 mygrid settings can be set within data.py
 
-plot.py is used to plot test images from the data generated from data.py. Check plot.py for comments on how to use it (it is meant for command line use).
+plot.py is used to plot test images from the data generated from data.py. Check plot.py for comments on how to use it (it is meant for command line use)
 
 nan.py is used to check for NaN values in the zarr data and provide details about where it is. Check nan.py for how to use it (it is meant for command line use).
+
+target.py is used to generate the target variable (it is meant for command line use)
+
+target_fast.py does the same as target.py but faster (it is meant for command line use)

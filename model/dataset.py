@@ -47,9 +47,11 @@ class ConvInitData(Dataset):
         input_store = zarr.open(input_path, mode='r')
         target_store = zarr.open(target_path, mode='r')
         # Print date and time of data (need to remove this when everything works)
-        print(extract_datetime(input_path))
-        # Ignore lat, lon, and time variables
+        # print(extract_datetime(input_path))
+        # Ignore lat, lon, and time variables (and others if you need to)
         input_variables = sorted([var for var in input_store.array_keys() if var not in ['time', 'lat', 'lon']])
+        # input_variables = sorted([var for var in input_variables if var not in ['DPT_2maboveground', 'HGT_0Cisotherm', 'MSLMA_meansealevel', 'rtma_GUST_10maboveground', 'SOILW_0M0mbelowground', 'TMP_2maboveground', 'TSOIL_0M0mbelowground', 'PWAT_entireatmosphere_consideredasasinglelayer_']])
+        # input_variables = sorted([item for item in input_variables if "1013D2mb" not in item])
         target_variables = sorted([var for var in target_store.array_keys() if var not in ['time', 'lat', 'lon']])
         # Combine variables and return tensors
         # Eager (works)
@@ -74,12 +76,12 @@ for batch_idx, (input_batch, target_batch) in enumerate(dataloader):
     print("Input Batch Shape:", input_batch.shape)
     print("Target Batch Shape:", target_batch.shape, "\n")
     # Plot some data
-    inslice = input_batch[0][71][1][:][:]
+    inslice = target_batch[0][0][0][:][:]
     plt.imshow(inslice.numpy(), cmap='viridis', origin='lower')
     plt.colorbar()
     plt.show()
     # Send the batch to the GPU (each piece of data takes up slightly more than 1GB of VRAM)
-    input_batch, target_batch = input_batch.to(DEVICE), target_batch.to(DEVICE)
+    # input_batch, target_batch = input_batch.to(DEVICE), target_batch.to(DEVICE)
     # Break after a certain number of batches are tested
     if batch_idx == 0:
         break
