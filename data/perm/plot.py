@@ -15,7 +15,6 @@ import random
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser = argparse.ArgumentParser()
     parser.add_argument('--dir', type=str)                            # Required, specify the data directory's name (ex. --dir 20230808_0150)
     parser.add_argument('--print', action='store_true')               # Print information about the variables being plotted (ex. --print)
     parser.add_argument('--save', action='store_true')                # Save the plots to the data folder (ex. --save)
