@@ -3,7 +3,7 @@
 """
 Created on Sun Feb 25 15:11:54 2024
 
-@author: atyagi
+@author: Atharva Tyagi
 """
 
 import torch, os
