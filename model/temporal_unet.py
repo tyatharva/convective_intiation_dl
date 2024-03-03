@@ -40,29 +40,36 @@ class TemporalUnet(nn.Module):
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
         self.timesteps = timesteps
 
-        for feature in features:
-            self.downs.append(DoubleConv(in_channels, feature))
-            in_channels = feature
-
-        for feature in reversed(features[:]):
+        for _ in range(self.timesteps):
+            down_t = nn.ModuleList()
+            enchan = in_channels
+            for feature in features:
+                down_t.append(DoubleConv(enchan, feature))
+                enchan = feature
+            self.downs.append(down_t)
+        
+        otc = 0
+        for i, feature in enumerate(reversed(features[:])):
+            inc = feature*((self.timesteps+(self.comnMult*2))/(pow(2, i)))
+            otc = inc/(self.comnMult*2)
             self.ups.append(
                 nn.ConvTranspose2d(
-                    int((feature*self.comnMult)*self.timesteps), int((feature*self.comnMult)*self.timesteps), kernel_size=2, stride=2,
+                    int(inc), int(inc), kernel_size=2, stride=2,
                 )
             )
-            self.ups.append(DoubleConv(int((feature*(1+self.comnMult))*self.timesteps), int((feature*self.timesteps))))
+            self.ups.append(DoubleConv(int(inc+(feature*self.timesteps)), int(otc)))
             
         self.bottleneck = DoubleConv(features[-1]*self.timesteps, int((features[-1]*self.comnMult)*self.timesteps))
-        self.final_conv = nn.Conv2d(features[0]*self.timesteps, out_channels, kernel_size=1)
+        self.final_conv = nn.Conv2d(int(otc), int(out_channels), kernel_size=1)
 
 
     def forward(self, x):
-        skip_connections = [[] for _ in range(len(self.downs))]
+        skip_connections = [[] for _ in range(len(self.downs[0]))]
         lagtimes = []
         
         for i in range(self.timesteps):
             w = x[:,i,:,:,:]
-            for level, down in enumerate(self.downs):
+            for level, down in enumerate(self.downs[i]):
                 w = down(w)
                 skip_connections[level].append(w)
                 w = self.pool(w)
